@@ -1,0 +1,33 @@
+# Render Blueprint — Bãi Đỗ Xe Thông Minh (1 link duy nhất: FastAPI phục vụ cả API, WebSocket /ws và giao diện React)
+# Dùng: đẩy code lên GitHub -> Render Dashboard -> New + -> Blueprint -> chọn repo này.
+services:
+  - type: web
+    name: smart-parking
+    runtime: python
+    plan: free
+    region: singapore
+    # Build cả Frontend (React -> frontend/dist) lẫn Backend (thư viện Python)
+    buildCommand: cd frontend && npm ci && npm run build && cd ../backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: NODE_VERSION
+        value: 20.18.0
+      # PostgreSQL miễn phí bên dưới — có DATABASE_URL thì backend tự dùng PostgreSQL thay cho SQLite
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-parking-db
+          property: connectionString
+      # Mật khẩu Admin gốc (trilevanminh71@gmail.com) cho lần khởi tạo đầu tiên — Render sẽ hỏi bạn nhập khi tạo Blueprint
+      - key: ADMIN_PASSWORD
+        sync: false
+
+databases:
+  - name: smart-parking-db
+    plan: free
+    region: singapore
+    databaseName: smart_parking
+    user: smart_parking

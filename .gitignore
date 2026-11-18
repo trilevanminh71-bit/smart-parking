@@ -1,0 +1,7 @@
+backend/venv/
+backend/parking.db*
+backend/uploads/
+__pycache__/
+frontend/node_modules/
+frontend/dist/
+.env

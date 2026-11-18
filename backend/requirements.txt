@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn>=0.29
+websockets>=12
+pydantic>=2.5
+python-multipart>=0.0.9
+# Chỉ dùng khi có biến môi trường DATABASE_URL (PostgreSQL trên Render); chạy Local vẫn dùng SQLite
+psycopg2-binary>=2.9.9

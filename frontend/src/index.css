@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  body { @apply bg-slate-950 text-slate-100 antialiased; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
+}
+
+@layer components {
+  .card { @apply min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-3 shadow-lg shadow-black/20 sm:p-4; }
+  .card-title { @apply mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:text-sm; }
+  /* Mobile: nút & ô nhập cao >= 44px để dễ chạm, chữ 16px để iOS không tự phóng to */
+  .btn { @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-[38px]; }
+  .btn-primary { @apply btn bg-sky-500 text-white hover:bg-sky-400; }
+  .btn-success { @apply btn bg-emerald-500 text-white hover:bg-emerald-400; }
+  .btn-warning { @apply btn bg-amber-500 text-slate-950 hover:bg-amber-400; }
+  .btn-danger { @apply btn bg-rose-500 text-white hover:bg-rose-400; }
+  .btn-ghost { @apply btn border border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-700; }
+  .btn-sm { @apply min-h-[38px] px-2.5 py-1.5 text-xs sm:min-h-[30px]; }
+  .input { @apply min-h-[44px] w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-base sm:min-h-[38px] sm:text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30; }
+  .label { @apply mb-1 block text-xs font-medium text-slate-400; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
+}
+
+/* Làm nổi bật khung bản đồ khi barrier mở */
+.nav-focus { animation: nav-focus 0.8s ease-in-out 3; border-radius: 0.875rem; }
+@keyframes nav-focus {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(66, 133, 244, 0); transform: scale(1); }
+  50% { box-shadow: 0 0 0 6px rgba(66, 133, 244, 0.55); transform: scale(1.015); }
+}
+
+/* Trang Khách hàng: chữ phụ sáng hơn để dễ đọc trên nền tối (người dùng phổ thông, ngoài trời) */
+.customer-ui .text-slate-500:not(:hover) { color: rgb(148 163 184); }   /* -> slate-400 */
+.customer-ui .text-slate-400:not(:hover) { color: rgb(203 213 225); }   /* -> slate-300 */
+.customer-ui .card-title { color: rgb(226 232 240); font-size: 0.875rem; }
+.customer-ui .label { color: rgb(203 213 225); font-size: 0.8125rem; }
+.customer-ui .card { border-color: rgb(51 65 85 / 0.7); }
+.customer-ui .input::placeholder { color: rgb(148 163 184); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
