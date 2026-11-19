@@ -1,5 +1,6 @@
 """Nghiệp vụ cốt lõi: đặt chỗ, check-in, tính tiền, thanh toán, cảm biến."""
 import math
+import os
 import re
 import secrets
 from datetime import timedelta
@@ -767,6 +768,6 @@ def public_state() -> dict:
         "slots": slots,
         "summary": summary,
         "settings": {**{k: cfg[k] for k in pub_keys}, "pending_minutes": PENDING_PAYMENT_MINUTES, "auto_gate": cfg["auto_gate"],
-                     "sepay_enabled": bool(cfg["sepay_api_key"])},
+                     "sepay_enabled": bool(cfg["sepay_api_key"].strip() or os.environ.get("SEPAY_API_KEY", "").strip())},
         "server_time": now_iso(),
     }

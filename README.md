@@ -73,7 +73,7 @@ Hoặc trên Windows: chạy file `run-frontend.bat`.
 - Khách đặt chỗ → vé `pending_payment` "Chờ chuyển khoản" giữ ô tối đa **5 phút**, thẻ vé hiện VietQR nội dung `COC <MÃ_VÉ> <BIỂN_SỐ>`
   và trạng thái "Đang chờ hệ thống xác nhận tiền vào...". Quá 5 phút chưa có tiền → tự hủy, ô trả về trống. Khách **không** tự xác nhận được.
 - Xe chưa có tiền cọc bị từ chối ở cổng (409).
-- `POST /api/payment/webhook` (SePay): header `Authorization: Apikey <sepay_api_key>` (sai → 401). Chỉ xử lý `transferType = "in"`,
+- `POST /api/payment/webhook` (SePay): header `Authorization: Apikey <KEY>` (cũng nhận `Bearer <KEY>` / `x-api-key`; sai → 401). `KEY` = biến môi trường `SEPAY_API_KEY` (khuyên dùng trên Render) hoặc khóa nhập ở Cài đặt Admin. Chỉ xử lý `transferType = "in"`,
   chống trùng theo `bank_tx_id`. Khớp `COC<MÃ_VÉ>` + đủ tiền → vé `active` / ô `reserved` (giữ `hold_minutes`), WebSocket `deposit_approved`
   → màn hình khách tự nhảy sang Vé QR + bản đồ, Admin nghe tiếng bíp. Nội dung `PHI <BIỂN_SỐ>` + đủ `amount_due` → xe đang đỗ được
   thanh toán `online_qr` và mở barrier ra. Luôn trả `{"success": true}`.

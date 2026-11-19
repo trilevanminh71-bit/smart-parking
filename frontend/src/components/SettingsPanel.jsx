@@ -91,7 +91,10 @@ export default function SettingsPanel({ toast }) {
           <li>Trong SePay chọn kiểu chứng thực <b>API Key</b>: SePay gửi header <span className="font-mono">Authorization: Apikey &lt;key&gt;</span>; sai key → 401.</li>
           <li>Link phải truy cập được từ Internet (VD: link ngrok <span className="font-mono">https://…ngrok-free.dev/api/payment/webhook</span>).</li>
           <li>Tiền vào đúng nội dung <span className="font-mono">COC &lt;MÃ_VÉ&gt;</span> và đủ số tiền → vé tự chuyển sang Đã đặt cọc. Giao dịch thiếu tiền / sai nội dung / về trễ được lưu ở tab <b>Đối soát</b>.</li>
-          <li>Trạng thái: {form.sepay_api_key ? <b className="text-emerald-300">Đã cấu hình</b> : <b className="text-rose-300">Chưa có API Key — webhook đang từ chối mọi yêu cầu, chỉ duyệt cọc thủ công</b>}</li>
+          <li>Trên Cloud (Render) có thể đặt biến môi trường <span className="font-mono">SEPAY_API_KEY</span> thay cho ô trên; SePay gửi <span className="font-mono">Apikey</span> hoặc <span className="font-mono">Bearer</span> đều được.</li>
+          <li>Trạng thái: {form.sepay_api_key || form.sepay_env_configured
+            ? <b className="text-emerald-300">Đã cấu hình{form.sepay_env_configured ? ' (biến môi trường SEPAY_API_KEY' + (form.sepay_api_key ? ' + ô trên)' : ')') : ''}</b>
+            : <b className="text-rose-300">Chưa có API Key — webhook đang từ chối mọi yêu cầu, chỉ duyệt cọc thủ công</b>}</li>
         </ul>
         <div className="mt-3 flex justify-end">
           <button className="btn-primary w-full sm:w-auto" disabled={!!busy}>{busy === 'SePay API Key' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Lưu API Key</button>

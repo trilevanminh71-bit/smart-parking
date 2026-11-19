@@ -1,4 +1,5 @@
 """API Bảo vệ / Admin — chỉ tài khoản role `admin` (header Authorization: Bearer <token>)."""
+import os
 import re
 
 from fastapi import APIRouter, Depends
@@ -28,7 +29,8 @@ def dashboard():
 
 @router.get("/settings")
 def read_settings():
-    return get_settings()
+    # Cho biết có SEPAY_API_KEY trong biến môi trường (Render) hay không — không trả về giá trị
+    return {**get_settings(), "sepay_env_configured": bool(os.environ.get("SEPAY_API_KEY", "").strip())}
 
 
 LEGACY_ACTIONS = ("reservation_soft", "reservation_bumped", "reservation_upgraded")
@@ -65,7 +67,7 @@ async def update_settings(body: SettingsUpdate, admin: dict = Depends(auth.requi
             svc.log(db, "admin", "settings", "Cập nhật cài đặt: " + "; ".join(changed))
             log_activity(db, admin["id"], admin["email"], "settings_update", "; ".join(changed))
     await manager.broadcast("settings")
-    return get_settings()
+    return read_settings()
 
 
 @router.post("/reservations/{rid}/approve")

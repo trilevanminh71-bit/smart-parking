@@ -4,6 +4,7 @@ import binascii
 import csv
 import hmac
 import io
+import os
 import re
 import secrets
 import unicodedata
@@ -35,13 +36,31 @@ def compact_text(s: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", s.upper())
 
 
-def check_api_key(header: str) -> bool:
-    """Header SePay: `Authorization: Apikey <sepay_api_key>`."""
-    key = get_settings()["sepay_api_key"].strip()
-    if not key:
-        return False
-    m = re.match(r"^\s*apikey\s+(.+?)\s*$", header or "", re.I)
-    return bool(m) and hmac.compare_digest(m.group(1).encode(), key.encode())
+def _clean_key(v: str) -> str:
+    """Bỏ khoảng trắng / xuống dòng / dấu nháy thừa khi copy-paste."""
+    return (v or "").strip().strip("\"'").strip()
+
+
+def valid_api_keys() -> list:
+    """Khóa hợp lệ: biến môi trường `SEPAY_API_KEY` (Render) và/hoặc khóa nhập trong Cài đặt Admin."""
+    keys = [_clean_key(os.environ.get("SEPAY_API_KEY", "")), _clean_key(get_settings()["sepay_api_key"])]
+    return [k for k in dict.fromkeys(keys) if k]
+
+
+def extract_api_key(headers) -> str:
+    """Nhận `Authorization: Apikey <KEY>` (chuẩn SePay), `Bearer <KEY>`, hoặc header `x-api-key`."""
+    auth = _clean_key(headers.get("authorization", ""))
+    m = re.match(r"^(?:apikey|bearer)\s*[:=]?\s*(.+)$", auth, re.I)
+    if m:
+        return _clean_key(m.group(1))
+    return _clean_key(headers.get("x-api-key", "")) or auth
+
+
+def check_api_key(headers) -> bool:
+    if isinstance(headers, str):
+        headers = {"authorization": headers}
+    got = extract_api_key(headers)
+    return bool(got) and any(hmac.compare_digest(got.encode(), k.encode()) for k in valid_api_keys())
 
 
 def _to_int(v) -> int:

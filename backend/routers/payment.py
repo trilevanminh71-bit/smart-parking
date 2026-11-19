@@ -14,9 +14,12 @@ admin_router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depe
 
 @router.post("/webhook")
 async def sepay_webhook(request: Request):
-    """Webhook SePay. Header bắt buộc: `Authorization: Apikey <sepay_api_key>` (sai -> 401).
+    """Webhook SePay. Header: `Authorization: Apikey <KEY>` (hoặc `Bearer <KEY>` / `x-api-key`), sai -> 401.
+    KEY = biến môi trường `SEPAY_API_KEY` hoặc khóa trong Cài đặt Admin.
     Luôn trả 200 {"success": true} cho request hợp lệ (kể cả giao dịch lỗi — đã lưu vào payment_logs để đối soát)."""
-    if not pay.check_api_key(request.headers.get("authorization", "")):
+    if not pay.check_api_key(request.headers):
+        configured = bool(pay.valid_api_keys())
+        print(f"[SePay webhook] 401 — {'API Key không khớp' if configured else 'chưa cấu hình SEPAY_API_KEY'}", flush=True)
         return JSONResponse({"success": False, "message": "API Key không hợp lệ hoặc chưa cấu hình"}, status_code=401)
     try:
         body = await request.json()
