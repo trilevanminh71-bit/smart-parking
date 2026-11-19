@@ -1,11 +1,14 @@
-import { BANK, RES_STATUS, saveBlob, transferNote, vnd } from './api.js'
+import { BANK, RES_STATUS, transferNote, vnd } from './api.js'
+import { getLang, tr } from './i18n/index.jsx'
 
 /**
- * Phiếu minh chứng chuyển khoản tiền cọc — vẽ bằng HTML Canvas ngay trên trình duyệt rồi tải về (.png).
+ * Phiếu minh chứng chuyển khoản tiền cọc — vẽ bằng HTML Canvas ngay trên trình duyệt (theo ngôn ngữ đang chọn).
  * Dùng khi đối soát với Bảo vệ: Mã vé, Biển số, Ô đỗ, Số tiền, Nội dung, Thời gian, Trạng thái.
+ * Trả về <canvas> (vẽ 2x cho nét trên điện thoại) để hiển thị dạng ảnh trong hộp thoại.
  */
-export function downloadProof(res, parkingName = 'Bãi Đỗ Xe Thông Minh') {
-  const W = 720, H = 980, S = 2 // vẽ 2x cho nét trên điện thoại
+export function renderProof(res, parkingName = 'Bãi Đỗ Xe Thông Minh') {
+  const t = (s) => tr(s)
+  const W = 720, H = 980, S = 2
   const c = document.createElement('canvas')
   c.width = W * S
   c.height = H * S
@@ -19,34 +22,35 @@ export function downloadProof(res, parkingName = 'Bãi Đỗ Xe Thông Minh') {
   g.fillRect(0, 0, W, 130)
   g.fillStyle = '#38bdf8'
   g.font = font(700, 30)
-  g.fillText('PHIẾU MINH CHỨNG CHUYỂN KHOẢN', 40, 62)
+  g.fillText(t('PHIẾU MINH CHỨNG CHUYỂN KHOẢN'), 40, 62)
   g.fillStyle = '#cbd5e1'
   g.font = font(400, 18)
-  g.fillText(`${parkingName} · Tiền đặt cọc giữ chỗ`, 40, 98)
+  g.fillText(t(`${parkingName} · Tiền đặt cọc giữ chỗ`), 40, 98)
 
-  const status = (RES_STATUS[res.status] || { label: res.status }).label
+  const status = t((RES_STATUS[res.status] || { label: res.status }).label)
   const content = transferNote(`COC ${res.ticket_code} ${res.license_plate}`)
+  const receipt = { new: 'Đã gửi — chờ đối soát', approved: 'Đã duyệt bù', refunded: 'Đã hoàn tiền' }[res.receipt_status] || 'Chưa gửi'
   const rows = [
-    ['Mã vé', res.ticket_code || '—'],
+    ['Mã vé', res.ticket_code || '—', 'code'],
     ['Biển số xe', res.license_plate],
-    ['Ô đỗ', `${res.slot_code}${res.floor ? ` (Tầng ${res.floor})` : ''}`],
+    ['Ô đỗ', `${res.slot_code}${res.floor ? ` (${t(`Tầng ${res.floor}`)})` : ''}`],
     ['Khách hàng', `${res.customer_name || ''}${res.phone ? ` · ${res.phone}` : ''}`],
-    ['Số tiền cọc', vnd(res.deposit_amount)],
-    ['Nội dung CK', content],
+    ['Số tiền cọc', vnd(res.deposit_amount), 'money'],
+    ['Nội dung CK', content, 'code'],
     ['Ngân hàng nhận', `${BANK.name} · ${BANK.account}`],
     ['Chủ tài khoản', BANK.holder],
     ['Thời gian đặt', fmt(res.created_at)],
-    ['Trạng thái vé', status],
-    ['Ảnh biên lai', res.receipt_status ? { new: 'Đã gửi — chờ đối soát', approved: 'Đã duyệt bù', refunded: 'Đã hoàn tiền' }[res.receipt_status] : 'Chưa gửi'],
+    ['Trạng thái vé', status, 'status'],
+    ['Ảnh biên lai', t(receipt)],
   ]
   let y = 190
-  rows.forEach(([k, v], i) => {
+  rows.forEach(([k, v, kind], i) => {
     if (i % 2 === 0) { g.fillStyle = '#f1f5f9'; g.fillRect(30, y - 34, W - 60, 56) }
     g.fillStyle = '#64748b'
     g.font = font(500, 19)
-    g.fillText(k, 50, y)
-    g.fillStyle = k === 'Số tiền cọc' ? '#0369a1' : k === 'Trạng thái vé' ? statusColor(res.status) : '#0f172a'
-    g.font = font(k === 'Mã vé' || k === 'Nội dung CK' ? 700 : 600, k === 'Số tiền cọc' ? 24 : 20)
+    g.fillText(t(k), 50, y)
+    g.fillStyle = kind === 'money' ? '#0369a1' : kind === 'status' ? statusColor(res.status) : '#0f172a'
+    g.font = font(kind === 'code' ? 700 : 600, kind === 'money' ? 24 : 20)
     wrap(g, String(v ?? '—'), 260, y, W - 300, 24)
     y += 60
   })
@@ -58,18 +62,17 @@ export function downloadProof(res, parkingName = 'Bãi Đỗ Xe Thông Minh') {
   g.fillStyle = '#475569'
   g.font = font(400, 16)
   const notes = [
-    `Phiếu tạo lúc ${fmt(new Date().toISOString())} trên trình duyệt của khách.`,
-    'Phiếu này là thông tin đối chiếu, KHÔNG thay thế biên lai của ngân hàng.',
-    'Nếu đã chuyển tiền nhưng vé chưa được duyệt: gửi kèm ảnh chụp giao dịch',
-    'trong app ngân hàng cho Bảo vệ / Quản trị viên để được duyệt bù hoặc hoàn tiền.',
+    t(`Phiếu tạo lúc ${fmt(new Date().toISOString())} trên trình duyệt của khách.`),
+    t('Phiếu này là thông tin đối chiếu, KHÔNG thay thế biên lai của ngân hàng.'),
+    t('Nếu đã chuyển tiền nhưng vé chưa được duyệt: gửi kèm ảnh chụp giao dịch'),
+    t('trong app ngân hàng cho Bảo vệ / Quản trị viên để được duyệt bù hoặc hoàn tiền.'),
   ]
-  notes.forEach((t, i) => g.fillText(t, 40, y + 22 + i * 26))
-
-  c.toBlob((blob) => blob && saveBlob(blob, `minh-chung-${res.ticket_code || res.id}.png`), 'image/png')
+  notes.forEach((s, i) => g.fillText(s, 40, y + 22 + i * 26))
+  return c
 }
 
 function fmt(iso) {
-  return iso ? new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+  return iso ? new Date(iso).toLocaleString(getLang() === 'en' ? 'en-GB' : 'vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 }
 function statusColor(s) {
   return { active: '#b45309', checked_in: '#047857', pending_payment: '#c2410c', expired: '#be123c', cancelled: '#475569' }[s] || '#0f172a'

@@ -69,7 +69,7 @@ export function Stat({ icon: Icon, label, value, sub, tone = 'sky' }) {
     emerald: 'text-emerald-400 bg-emerald-500/10',
     amber: 'text-amber-400 bg-amber-500/10',
     rose: 'text-rose-400 bg-rose-500/10',
-    slate: 'text-slate-50 bg-[#475569] ring-1 ring-[#64748b]', // màu "Có xe"
+    slate: 'text-white bg-[#475569] ring-1 ring-[#64748b]', // màu "Có xe"
     violet: 'text-violet-400 bg-violet-500/10',
   }
   return (

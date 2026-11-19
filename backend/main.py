@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 
 import services as svc
@@ -49,6 +50,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Bãi đỗ xe thông minh 3 tầng", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Nén gzip phản hồi API & file tĩnh (JS/CSS/HTML) >= 500 byte — tải trang nhanh hơn trên 4G
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 for r in (auth_router.router, parking.router, reservations.router, hardware.router, admin.router,
           payment.router, payment.admin_router):
@@ -90,5 +93,7 @@ if DIST.exists():
             svc.fail("Không tìm thấy API", 404)
         file = (DIST / path).resolve()
         if path and file.is_file() and DIST.resolve() in file.parents:
-            return FileResponse(file)
-        return FileResponse(DIST / "index.html")
+            # File trong assets/ có mã hash trong tên -> cache lâu dài; file khác luôn kiểm tra bản mới
+            cache = "public, max-age=31536000, immutable" if path.startswith("assets/") else "no-cache"
+            return FileResponse(file, headers={"Cache-Control": cache})
+        return FileResponse(DIST / "index.html", headers={"Cache-Control": "no-cache"})

@@ -253,7 +253,7 @@ export const STATUS = {
   reserved: { label: 'Đã đặt cọc', dot: 'bg-amber-400', cls: 'border-amber-500/60 bg-amber-500/15 text-amber-300' },
   pending_payment: { label: 'Chờ chuyển khoản', short: 'Chờ CK', dot: 'bg-orange-400', cls: 'border-orange-500/60 bg-orange-500/15 text-orange-300' },
   // Có xe: xám xanh đậm #475569, viền #64748b, chữ/icon sáng — dịu mắt, khác hẳn xanh lá / vàng / cam
-  occupied: { label: 'Có xe', dot: 'bg-[#64748b]', cls: '!border-solid border-[#64748b] bg-[#475569] text-slate-50' },
+  occupied: { label: 'Có xe', dot: 'bg-[#64748b]', cls: '!border-solid border-[#64748b] bg-[#475569] text-white' },
 }
 
 export const RES_STATUS = {

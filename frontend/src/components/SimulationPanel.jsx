@@ -229,7 +229,7 @@ function SensorSim({ slots, toast }) {
         {slots.map((s) => <option key={s.code} value={s.code}>{s.code} ({s.status})</option>)}
       </select>
       <div className="grid grid-cols-2 gap-1.5">
-        <button className="btn btn-sm border border-[#64748b] bg-[#475569] text-slate-50 hover:bg-[#526178]" onClick={() => send(true)}>
+        <button className="btn btn-sm border border-[#64748b] bg-[#475569] text-white hover:bg-[#526178]" onClick={() => send(true)}>
           <Car className="h-3.5 w-3.5" strokeWidth={2.4} /> Có xe
         </button>
         <button className="btn-success btn-sm" onClick={() => send(false)}>Trống</button>

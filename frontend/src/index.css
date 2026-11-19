@@ -3,7 +3,8 @@
 @tailwind utilities;
 
 @layer base {
-  html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+  html { color-scheme: light; -webkit-text-size-adjust: 100%; }
+  html.dark { color-scheme: dark; }
   body { @apply bg-slate-950 text-slate-100 antialiased; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
 }
 
@@ -30,13 +31,27 @@
   50% { box-shadow: 0 0 0 6px rgba(66, 133, 244, 0.55); transform: scale(1.015); }
 }
 
-/* Trang Khách hàng: chữ phụ sáng hơn để dễ đọc trên nền tối (người dùng phổ thông, ngoài trời) */
-.customer-ui .text-slate-500:not(:hover) { color: rgb(148 163 184); }   /* -> slate-400 */
-.customer-ui .text-slate-400:not(:hover) { color: rgb(203 213 225); }   /* -> slate-300 */
-.customer-ui .card-title { color: rgb(226 232 240); font-size: 0.875rem; }
-.customer-ui .label { color: rgb(203 213 225); font-size: 0.8125rem; }
-.customer-ui .card { border-color: rgb(51 65 85 / 0.7); }
-.customer-ui .input::placeholder { color: rgb(148 163 184); }
+/* Trang Khách hàng: chữ phụ đậm/sáng hơn để dễ đọc (người dùng phổ thông, ngoài trời) — dùng biến màu nên đúng cả Sáng lẫn Tối */
+.customer-ui .text-slate-500:not(:hover) { color: rgb(var(--c-slate-400)); }
+.customer-ui .text-slate-400:not(:hover) { color: rgb(var(--c-slate-300)); }
+.customer-ui .card-title { color: rgb(var(--c-slate-200)); font-size: 0.875rem; }
+.customer-ui .label { color: rgb(var(--c-slate-300)); font-size: 0.8125rem; }
+.customer-ui .card { border-color: rgb(var(--c-slate-700) / 0.7); }
+.customer-ui .input::placeholder { color: rgb(var(--c-slate-400)); }
+
+/* Giao diện Sáng: vài chỗ dùng màu cố định cho nền tối */
+html:not(.dark) .hover\:text-white:hover { color: rgb(var(--c-slate-50)); }
+html:not(.dark) .btn-warning { color: #0f172a; }
+html:not(.dark) .card { box-shadow: 0 1px 3px rgb(15 23 42 / 0.08); }
+html:not(.dark) body { background-image: none; }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--c-slate-700)); border-radius: 8px; }
+
+/* In phiếu minh chứng: chỉ in vùng .print-area */
+@media print {
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area { position: fixed; inset: 0; margin: 0 auto; }
+  .print-area img { width: 100%; max-width: 720px; height: auto; }
+}

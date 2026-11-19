@@ -6,6 +6,9 @@ import AdminView from './pages/AdminView.jsx'
 import AuthScreen from './pages/AuthScreen.jsx'
 import { AccountModal } from './components/AccountPanels.jsx'
 import { ToastProvider } from './components/ui.jsx'
+import PrefsControls from './components/PrefsControls.jsx'
+import { useBackHome } from './nav.js'
+import { useLang } from './i18n/index.jsx'
 import {
   api, emitEvent, expireAccount, forgetAccount, loadAccounts, loadAuth, rememberAccount, saveAuth, tokenValid, useNow, useRealtime,
 } from './api.js'
@@ -121,8 +124,15 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
   useEffect(() => { if (connected) load() }, [connected, load])
   useEffect(() => { try { localStorage.setItem(MODE_KEY, mode) } catch { /* ignore */ } }, [mode])
 
+  // Trang Bảo vệ/Admin là "trang phụ": nút Back (<) của trình duyệt / vuốt cạnh trái đưa về Trang chủ (Đặt chỗ)
+  useBackHome(view !== 'customer', () => {
+    try { localStorage.setItem('sp_customer_tab', 'book') } catch { /* ignore */ }
+    setMode('customer')
+  })
+
+  const { t, lang } = useLang()
   const parkingName = state?.settings?.parking_name || 'Bãi Đỗ Xe Thông Minh'
-  useEffect(() => { document.title = parkingName }, [parkingName])
+  useEffect(() => { document.title = t(parkingName) }, [parkingName, t])
 
   // Lần đầu vào Trang Khách hàng (chưa từng bấm "Đã hiểu") -> tự mở hướng dẫn
   useEffect(() => { if (view === 'customer' && !guideSeen()) setGuide(true) }, [view])
@@ -144,7 +154,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
           </div>
 
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
-            <span className="hidden font-mono text-sm text-slate-400 xl:inline">{new Date(now).toLocaleTimeString('vi-VN')}</span>
+            <span className="hidden font-mono text-sm text-slate-400 xl:inline">{new Date(now).toLocaleTimeString(lang === 'en' ? 'en-GB' : 'vi-VN')}</span>
             <span className={`badge shrink-0 !p-1.5 sm:!px-2 sm:!py-0.5 ${connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`} title={connected ? 'Đang kết nối realtime' : 'Mất kết nối realtime'}>
               {connected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
               <span className="hidden lg:inline">{connected ? 'Realtime' : 'Mất kết nối'}</span>
@@ -161,8 +171,10 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
               </div>
             )}
 
+            <PrefsControls />
+
             <button onClick={() => setGuide(true)} title="Hướng dẫn sử dụng" aria-label="Hướng dẫn sử dụng"
-              className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1 rounded-xl border border-slate-800 bg-slate-900 px-2 text-sm text-slate-200 hover:border-sky-500 hover:text-sky-300 sm:px-3">
+              className="hidden min-h-[44px] min-w-[44px] shrink-0 sm:flex items-center justify-center gap-1 rounded-xl border border-slate-800 bg-slate-900 px-2 text-sm text-slate-200 hover:border-sky-500 hover:text-sky-300 sm:px-3">
               <HelpCircle className="h-4 w-4" /> <span className="hidden sm:inline">Hướng dẫn</span>
             </button>
 
@@ -171,11 +183,11 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
               <button onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-haspopup="menu"
                 className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 py-1 pl-1 pr-2 hover:border-slate-600">
                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isAdmin ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-200'}`}>{initials}</span>
-                <span className="min-w-0 text-left">
+                <span className="hidden min-w-0 text-left min-[480px]:block">
                   <span className="block max-w-[96px] truncate text-xs font-semibold leading-tight sm:max-w-[160px] sm:text-sm">{user.full_name}</span>
                   <span className="hidden max-w-[160px] truncate text-[11px] leading-tight text-slate-400 md:block">{user.email}</span>
                 </span>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition ${menu ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`hidden h-4 w-4 shrink-0 text-slate-500 transition min-[480px]:block ${menu ? 'rotate-180' : ''}`} />
               </button>
 
               {menu && (

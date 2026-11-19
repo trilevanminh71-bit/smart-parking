@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ParkingSquare, LogIn, UserPlus, Loader2, Mail, Lock, User, Phone, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import AccountSwitcher, { SwitcherHeader } from '../components/AccountSwitcher.jsx'
 import { api } from '../api.js'
+import PrefsControls from '../components/PrefsControls.jsx'
 
 /**
  * Màn hình Đăng nhập / Tạo tài khoản (bắt buộc khi chưa đăng nhập).
@@ -48,7 +49,8 @@ export default function AuthScreen({ onAuth, accounts = [], currentEmail, onPick
   )
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,rgba(14,165,233,0.18),transparent_60%)] px-4 py-8">
+    <div className="relative flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,rgba(14,165,233,0.18),transparent_60%)] px-4 py-8">
+      <div className="absolute right-3 top-[calc(0.75rem+env(safe-area-inset-top))]"><PrefsControls compact /></div>
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3 rounded-2xl bg-sky-500 p-3 shadow-lg shadow-sky-500/30"><ParkingSquare className="h-9 w-9 text-white" /></div>

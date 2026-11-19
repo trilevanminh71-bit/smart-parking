@@ -4,7 +4,8 @@ import {
   Megaphone, ChevronRight, Hand, LifeBuoy, CheckCircle2, AlertTriangle,
 } from 'lucide-react'
 import ReceiptUploadModal from '../components/ReceiptUploadModal.jsx'
-import { downloadProof } from '../proof.js'
+import ProofModal from '../components/ProofModal.jsx'
+import { useBackHome } from '../nav.js'
 import ParkingMap2D, { ParkingMap3D } from '../components/ParkingMap.jsx'
 import BookingModal from '../components/BookingModal.jsx'
 import PaymentQRModal from '../components/PaymentQRModal.jsx'
@@ -79,6 +80,8 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
     try { localStorage.setItem(TAB_KEY, t) } catch { /* ignore */ }
     window.scrollTo({ top: 0 })
   }
+  // Nút Back (<) / vuốt cạnh trái khi đang ở "Vé của tôi" hoặc "Lịch sử" -> về tab Đặt chỗ (Trang chủ)
+  useBackHome(tab !== 'book', () => goTab('book'))
   // Có tin mới về vé của tôi -> tự chuyển sang tab "Vé của tôi"
   const focusTickets = (scrollSel) => {
     if (tabRef.current !== 'tickets') { setTab('tickets'); try { localStorage.setItem(TAB_KEY, 'tickets') } catch { /* ignore */ } }
@@ -266,7 +269,9 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
     } catch (err) { toast(err.message, 'error') }
   }
 
-  const proof = (r) => downloadProof(r, settings.parking_name)
+  // Phiếu minh chứng: mở hộp thoại hiện ảnh phiếu ngay trên trang (không tải file blob:/data: — Zalo/WebView chặn)
+  const [proofRes, setProofRes] = useState(null)
+  const proof = (r) => setProofRes(r)
 
   const active = history.reservations.filter((r) => r.status === 'active' || r.status === 'pending_payment')
   const highlight = active[0]?.slot_code
@@ -428,6 +433,7 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
       )}
 
       <ReceiptUploadModal res={receiptRes} toast={toast} onClose={() => setReceiptRes(null)} />
+      <ProofModal res={proofRes} parkingName={settings.parking_name} toast={toast} onClose={() => setProofRes(null)} />
 
       <BookingModal
         slot={booking}

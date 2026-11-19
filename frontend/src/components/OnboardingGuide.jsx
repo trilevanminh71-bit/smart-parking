@@ -15,7 +15,7 @@ const LEGEND = [
   ['Trống', 'bg-emerald-400', 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300'],
   ['Đã đặt cọc', 'bg-amber-400', 'border-amber-500/60 bg-amber-500/15 text-amber-300'],
   ['Chờ chuyển khoản', 'bg-orange-400', 'border-orange-500/60 bg-orange-500/15 text-orange-300'],
-  ['Có xe', 'bg-[#64748b]', 'border-[#64748b] bg-[#475569] text-slate-50'],
+  ['Có xe', 'bg-[#64748b]', 'border-[#64748b] bg-[#475569] text-white'],
 ]
 
 function Step({ n, icon: Icon, tone, title, children }) {
