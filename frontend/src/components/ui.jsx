@@ -11,8 +11,8 @@ export function Modal({ open, onClose, title, icon: Icon, children, width = 'max
   }, [open, onClose])
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={onClose}>
-      <div className={`w-full ${width} max-h-[94dvh] overflow-y-auto rounded-t-2xl border border-slate-700 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-h-[92vh] sm:rounded-2xl sm:p-5`} onMouseDown={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={onClose}>
+      <div className={`modal-panel w-full ${width} max-h-[94dvh] overflow-y-auto rounded-t-2xl border border-slate-700 bg-slate-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:max-h-[92vh] sm:rounded-2xl sm:p-5`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="flex items-center gap-2 text-lg font-semibold">
             {Icon && <Icon className="h-5 w-5 text-sky-400" />} {title}
@@ -69,7 +69,7 @@ export function Stat({ icon: Icon, label, value, sub, tone = 'sky' }) {
     emerald: 'text-emerald-400 bg-emerald-500/10',
     amber: 'text-amber-400 bg-amber-500/10',
     rose: 'text-rose-400 bg-rose-500/10',
-    slate: 'text-white bg-[#475569] ring-1 ring-[#64748b]', // màu "Có xe"
+    slate: 'slot-occupied text-white bg-[#475569] ring-1 ring-[#64748b]', // màu "Có xe"
     violet: 'text-violet-400 bg-violet-500/10',
   }
   return (

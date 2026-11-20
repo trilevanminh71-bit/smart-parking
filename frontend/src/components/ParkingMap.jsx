@@ -19,7 +19,7 @@ export function ParkingMap3D({ summary, floor, onFloor }) {
           >
             <div className="absolute inset-1.5 grid grid-cols-5 grid-rows-2 gap-1">
               {Array.from({ length: s.total }).map((_, i) => {
-                const st = i < s.occupied ? 'bg-[#475569] ring-1 ring-inset ring-[#64748b] !opacity-100' : i < s.occupied + s.reserved ? 'bg-amber-400' : 'bg-emerald-400'
+                const st = i < s.occupied ? 'dot-occupied bg-[#475569] ring-1 ring-inset ring-[#64748b] !opacity-100' : i < s.occupied + s.reserved ? 'dot-reserved bg-amber-400' : 'dot-available bg-emerald-400'
                 return <span key={i} className={`rounded-sm ${st} opacity-80`} />
               })}
             </div>
@@ -29,7 +29,7 @@ export function ParkingMap3D({ summary, floor, onFloor }) {
       <div className="mt-10 grid w-full grid-cols-3 gap-2 text-center text-xs">
         {[1, 2, 3].map((f) => (
           <button key={f} onClick={() => onFloor(f)} className={`rounded-lg px-2 py-1 ${f === floor ? 'bg-sky-500/20 text-sky-300' : 'text-slate-400 hover:text-slate-200'}`}>
-            Tầng {f}: <b className="text-emerald-400">{summary?.[f]?.available ?? 0}</b> trống
+            Tầng {f}: <b className="text-emerald-800 dark:text-emerald-400">{summary?.[f]?.available ?? 0}</b> trống
           </button>
         ))}
       </div>

@@ -294,7 +294,7 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
 
           <div className="card">
             <div className="card-title"><ScrollText className="h-4 w-4" /> Nhật ký phần cứng ESP32 / Barrier / ALPR</div>
-            <div className="max-h-72 overflow-y-auto rounded-xl bg-black/40 p-3 font-mono text-xs">
+            <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-xs dark:border-transparent dark:bg-black/40">
               {data.logs.length === 0 ? <div className="text-slate-500">Chưa có log</div> : data.logs.map((l) => (
                 <div key={l.id} className="flex flex-wrap gap-x-2 border-b border-white/5 py-1 sm:flex-nowrap sm:border-0 sm:py-0.5">
                   <span className="shrink-0 text-slate-500">{fmtTime(l.created_at)}</span>

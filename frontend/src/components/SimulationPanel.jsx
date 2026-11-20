@@ -144,7 +144,7 @@ const GateCamera = forwardRef(function GateCamera({ gate, onResult, toast, autoG
         {flash && <div className="absolute inset-0 bg-white/70" />}
         {busy && <div className="absolute inset-x-0 top-0 h-1 animate-[ping_1s_linear_infinite] bg-sky-400/70" />}
         {scan && (
-          <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-emerald-300">
+          <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-[#6ee7b7]">
             <ScanLine className="mr-1 inline h-3 w-3" />{scan.plate} · {Math.round(scan.confidence * 100)}%
           </div>
         )}
@@ -229,7 +229,7 @@ function SensorSim({ slots, toast }) {
         {slots.map((s) => <option key={s.code} value={s.code}>{s.code} ({s.status})</option>)}
       </select>
       <div className="grid grid-cols-2 gap-1.5">
-        <button className="btn btn-sm border border-[#64748b] bg-[#475569] text-white hover:bg-[#526178]" onClick={() => send(true)}>
+        <button className="btn btn-sm slot-occupied border border-[#64748b] bg-[#475569] text-white hover:bg-[#526178]" onClick={() => send(true)}>
           <Car className="h-3.5 w-3.5" strokeWidth={2.4} /> Có xe
         </button>
         <button className="btn-success btn-sm" onClick={() => send(false)}>Trống</button>

@@ -328,7 +328,7 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
                         ? 'border-sky-400 bg-sky-500 text-white shadow-lg shadow-sky-500/25'
                         : 'border-slate-700 bg-slate-950/60 text-slate-100 hover:border-slate-500'}`}>
                       <span className="text-base font-bold">Tầng {f}</span>
-                      <span className={`text-xs font-medium ${on ? 'text-sky-50' : free ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      <span className={`text-xs font-medium ${on ? 'text-white' : free ? 'text-emerald-300' : 'text-rose-300'}`}>
                         {free ? `${free} chỗ trống` : 'Hết chỗ'}
                       </span>
                     </button>

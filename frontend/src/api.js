@@ -249,11 +249,12 @@ export const fmtDuration = (sec) => {
 export const FLOOR_LETTER = { 1: 'A', 2: 'B', 3: 'C' }
 
 export const STATUS = {
-  available: { label: 'Trống', dot: 'bg-emerald-400', cls: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' },
-  reserved: { label: 'Đã đặt cọc', dot: 'bg-amber-400', cls: 'border-amber-500/60 bg-amber-500/15 text-amber-300' },
-  pending_payment: { label: 'Chờ chuyển khoản', short: 'Chờ CK', dot: 'bg-orange-400', cls: 'border-orange-500/60 bg-orange-500/15 text-orange-300' },
-  // Có xe: xám xanh đậm #475569, viền #64748b, chữ/icon sáng — dịu mắt, khác hẳn xanh lá / vàng / cam
-  occupied: { label: 'Có xe', dot: 'bg-[#64748b]', cls: '!border-solid border-[#64748b] bg-[#475569] text-white' },
+  // slot-* / dot-*: giao diện Sáng ghi đè màu trong index.css (Trống xanh lá, Chờ/Đã cọc vàng, Có xe đỏ)
+  available: { label: 'Trống', dot: 'bg-emerald-400 dot-available', cls: 'slot-available border-emerald-500/60 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25' },
+  reserved: { label: 'Đã đặt cọc', dot: 'bg-amber-400 dot-reserved', cls: 'slot-reserved border-amber-500/60 bg-amber-500/15 text-amber-300' },
+  pending_payment: { label: 'Chờ chuyển khoản', short: 'Chờ CK', dot: 'bg-orange-400 dot-pending', cls: 'slot-pending border-orange-500/60 bg-orange-500/15 text-orange-300' },
+  // Có xe (giao diện Tối): xám xanh đậm #475569, viền #64748b, chữ/icon sáng
+  occupied: { label: 'Có xe', dot: 'bg-[#64748b] dot-occupied', cls: 'slot-occupied !border-solid border-[#64748b] bg-[#475569] text-white' },
 }
 
 export const RES_STATUS = {

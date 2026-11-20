@@ -237,7 +237,7 @@ export default function NavMiniMap({ slotCode, slots, plate, gateOpen = true, on
         )}
       </div>
       {straightFirst && (
-        <div className="flex items-center gap-1.5 bg-[#08472d] px-3 py-1 text-xs font-medium text-emerald-50 sm:px-4 sm:text-sm">
+        <div className="flex items-center gap-1.5 bg-[#08472d] px-3 py-1 text-xs font-medium text-white sm:px-4 sm:text-sm">
           Sau đó {floor > 1 && <><MoveUpRight className="h-4 w-4" strokeWidth={2.5} /> lên ram ·</>}
           <TurnIcon className="h-4 w-4" strokeWidth={2.5} /> {top ? 'rẽ trái' : 'rẽ phải'}
         </div>
