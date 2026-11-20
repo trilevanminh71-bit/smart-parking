@@ -1,4 +1,7 @@
 """Thanh toán: Webhook SePay (tự duyệt cọc / phí gửi xe), biên lai khách gửi, đối soát cho Admin."""
+import json
+from urllib.parse import parse_qs
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -12,20 +15,49 @@ router = APIRouter(prefix="/api/payment", tags=["payment"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(auth.require_admin)])
 
 
-@router.post("/webhook")
-async def sepay_webhook(request: Request):
-    """Webhook SePay. Header: `Authorization: Apikey <KEY>` (hoặc `Bearer <KEY>` / `x-api-key`), sai -> 401.
-    KEY = biến môi trường `SEPAY_API_KEY` hoặc khóa trong Cài đặt Admin.
-    Luôn trả 200 {"success": true} cho request hợp lệ (kể cả giao dịch lỗi — đã lưu vào payment_logs để đối soát)."""
-    if not pay.check_api_key(request.headers):
-        configured = bool(pay.valid_api_keys())
-        print(f"[SePay webhook] 401 — {'API Key không khớp' if configured else 'chưa cấu hình SEPAY_API_KEY'}", flush=True)
-        return JSONResponse({"success": False, "message": "API Key không hợp lệ hoặc chưa cấu hình"}, status_code=401)
+WEBHOOK_METHODS = ["GET", "HEAD", "POST", "OPTIONS"]
+
+
+def _parse_body(raw: bytes, ctype: str):
+    """JSON (chuẩn SePay) hoặc form-urlencoded (dự phòng)."""
+    if not raw:
+        return None
     try:
-        body = await request.json()
+        return json.loads(raw)
     except Exception:
-        body = None
+        pass
+    if "form" in ctype:
+        return {k: v[-1] for k, v in parse_qs(raw.decode("utf-8", "replace")).items()}
+    return None
+
+
+async def sepay_webhook(request: Request):
+    """Webhook SePay — chính thức: `POST /api/payment/webhook` (nhận cả `/webhook/`, `/api/sepay/webhook`).
+    Header: `Authorization: Apikey <KEY>` (hoặc `Bearer <KEY>` / `X-Api-Key`), sai -> 401 kèm lý do.
+    GET/HEAD/OPTIONS (SePay / trình duyệt kiểm tra kết nối) -> 200, không xử lý giao dịch.
+    POST hợp lệ luôn trả 200 {"success": true} (giao dịch lỗi vẫn lưu payment_logs để đối soát)."""
+    raw = await request.body()
+    client = request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")
+    # Log chi tiết NGAY ĐẦU HÀM (trước khi kiểm tra khóa) -> xem trong Render → Logs; giá trị khóa luôn được che
+    print(f"[SePay webhook] {request.method} {request.url.path}{'?' + request.url.query if request.url.query else ''} "
+          f"từ {client}\n  headers = {json.dumps(pay.mask_headers(request.headers), ensure_ascii=False)}\n"
+          f"  body ({len(raw)} byte) = {raw[:4000].decode('utf-8', 'replace')}", flush=True)
+
+    if request.method != "POST":
+        if request.method == "HEAD":
+            return Response(status_code=200)
+        return {"success": True, "message": "Webhook SePay đang hoạt động — SePay cần gửi POST kèm JSON giao dịch",
+                "api_key_configured": bool(pay.valid_api_keys())}
+
+    problem = pay.api_key_problem(request.headers)
+    if problem:
+        fps = ", ".join("#" + pay.key_fingerprint(k) for k in pay.valid_api_keys()) or "không có"
+        print(f"[SePay webhook] 401 — {problem} (khóa trên server: {fps})", flush=True)
+        return JSONResponse({"success": False, "message": problem}, status_code=401)
+
+    body = _parse_body(raw, request.headers.get("content-type", ""))
     if not isinstance(body, dict):
+        print("[SePay webhook] Bỏ qua: body không phải JSON object", flush=True)
         return {"success": True, "note": "Bỏ qua: dữ liệu không phải JSON object"}
     result = pay.process_webhook(body)
     for event, data in result.get("events", []):
@@ -34,7 +66,17 @@ async def sepay_webhook(request: Request):
         await barriers.open("exit", f"Xe {result['open_exit']} đã thanh toán (SePay)")
     if result.get("log") or result.get("open_exit"):
         await manager.broadcast("log")
+    log = result.get("log")
+    print(f"[SePay webhook] OK — {log.get('status') if isinstance(log, dict) else 'đã xử lý'}", flush=True)
     return {"success": True}
+
+
+for _p in ("/webhook", "/webhook/"):
+    router.add_api_route(_p, sepay_webhook, methods=WEBHOOK_METHODS, include_in_schema=_p == "/webhook")
+# Đường dẫn phụ phòng khi nhập nhầm URL trong SePay
+alias_router = APIRouter(tags=["payment"])
+for _p in ("/api/sepay/webhook", "/api/sepay/webhook/", "/api/webhook", "/webhook"):
+    alias_router.add_api_route(_p, sepay_webhook, methods=WEBHOOK_METHODS, include_in_schema=False)
 
 
 @router.post("/receipts")

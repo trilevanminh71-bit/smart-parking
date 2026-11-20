@@ -2,6 +2,7 @@
 import base64
 import binascii
 import csv
+import hashlib
 import hmac
 import io
 import os
@@ -57,10 +58,43 @@ def extract_api_key(headers) -> str:
 
 
 def check_api_key(headers) -> bool:
+    return api_key_problem(headers) is None
+
+
+def key_fingerprint(k: str) -> str:
+    """Dấu vân tay ngắn (8 ký tự đầu SHA-256) để so 2 khóa có giống nhau không mà không in khóa ra log."""
+    return hashlib.sha256(k.encode()).hexdigest()[:8] if k else "-"
+
+
+def api_key_problem(headers):
+    """None nếu khóa hợp lệ; ngược lại trả về lý do lỗi rõ ràng (không chứa giá trị khóa)."""
     if isinstance(headers, str):
         headers = {"authorization": headers}
+    keys = valid_api_keys()
+    if not keys:
+        return "Server chưa cấu hình SEPAY_API_KEY (Render → Environment) hoặc SePay API Key trong Cài đặt Admin"
+    if not (headers.get("authorization") or headers.get("x-api-key")):
+        return "Thiếu header 'Authorization: Apikey <KEY>' — kiểm tra kiểu chứng thực API Key trong cấu hình webhook SePay"
     got = extract_api_key(headers)
-    return bool(got) and any(hmac.compare_digest(got.encode(), k.encode()) for k in valid_api_keys())
+    if not got or not any(hmac.compare_digest(got.encode(), k.encode()) for k in keys):
+        return "API Key không khớp với SEPAY_API_KEY trên server — nhập lại cùng một khóa ở SePay và Render"
+    return None
+
+
+def mask_headers(headers) -> dict:
+    """Toàn bộ header để ghi log, che giá trị khóa: 'Apikey ***(19 ký tự, #1a2b3c4d)'."""
+    out = {}
+    for k, v in headers.items():
+        lk = k.lower()
+        if lk in ("authorization", "x-api-key", "cookie"):
+            scheme = ""
+            if lk == "authorization":
+                m = re.match(r"^\s*(apikey|bearer|basic)\b", v, re.I)
+                scheme = (m.group(1) + " ") if m else ""
+            key = extract_api_key({lk: v})
+            v = f"{scheme}***({len(key)} ký tự, #{key_fingerprint(key)})" if lk != "cookie" else "***"
+        out[k] = v
+    return out
 
 
 def _to_int(v) -> int:

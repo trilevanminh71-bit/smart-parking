@@ -7,10 +7,10 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 import services as svc
 from database import db_kind, init_db
@@ -43,7 +43,11 @@ async def lifespan(app: FastAPI):
     freed = svc.cleanup_legacy_soft_holds()  # đã bỏ đặt chỗ không cọc: trả ô soft_reserved về trống
     if freed:
         log.info("Đã trả ô giữ tạm (không cọc) về trống: %s", freed)
-    task = asyncio.create_task(expire_loop())
+    import payments as pay
+    keys = pay.valid_api_keys()
+    print("[SePay] API Key: " + (", ".join(f"{len(k)} ký tự #{pay.key_fingerprint(k)}" for k in keys) if keys
+                                  else "CHƯA cấu hình — webhook sẽ trả 401"), flush=True)
+    task =asyncio.create_task(expire_loop())
     yield
     task.cancel()
 
@@ -54,7 +58,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 for r in (auth_router.router, parking.router, reservations.router, hardware.router, admin.router,
-          payment.router, payment.admin_router):
+          payment.router, payment.admin_router, payment.alias_router):
     app.include_router(r)
 
 
@@ -82,6 +86,13 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         manager.disconnect(ws)
+
+
+@app.api_route("/api/{path:path}", methods=["POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
+async def api_not_found(path: str, request: Request):
+    """API không tồn tại -> 404 rõ ràng (trước đây rơi vào route SPA chỉ nhận GET nên báo 405)."""
+    print(f"[API] 404 {request.method} /api/{path}", flush=True)
+    return JSONResponse({"detail": f"Không tìm thấy API {request.method} /api/{path}"}, status_code=404)
 
 
 # Nếu đã build frontend (npm run build) thì phục vụ luôn tại cổng 8000
