@@ -1007,6 +1007,11 @@ export const DICT = {
   "Chế độ Demo/Test — điền nhanh tài khoản mẫu": "Demo/Test mode — quick-fill sample accounts",
   "Chỉ điền email — mật khẩu do bạn nhập. Khách hàng: tạo nhanh 1 tài khoản test mới.": "Fills the email only — you type the password. Customer: quickly creates a new test account.",
   "Đã đăng xuất.": "Signed out.",
+  "Chuyển sang Bảo vệ": "Switch to Guard",
+  "Chuyển sang Khách hàng": "Switch to Customer",
+  "Chuyển sang Quản trị viên": "Switch to Administrator",
+  "Đăng nhập / tạo tài khoản": "Sign in / create account",
+  "Đang chạy CSDL SQLite trên máy (backend/.env chưa có DATABASE_URL) — dữ liệu KHÁC bản Cloud Neon": "Running the local SQLite database (no DATABASE_URL in backend/.env) — data DIFFERS from the Cloud Neon version",
 }
 
 export const TEMPLATES = [
@@ -1294,4 +1299,5 @@ export const TEMPLATES = [
   ["Xe {} chưa thanh toán — cần trả {}", "Car {0} has not paid — {1} due"],
   ["Đã đăng xuất {}.", "Signed out {0}."],
   ["Tài khoản {}", "Account {0}"],
+  ["{} · cần nhập mật khẩu", "{0} · password required"],
 ]

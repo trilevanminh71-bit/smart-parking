@@ -8,6 +8,8 @@ tự chuyển sang cú pháp PostgreSQL nên không phải viết 2 bộ câu l�
 import os
 import re
 import sqlite3
+
+import envfile  # noqa: F401 — nạp backend/.env (Local) trước khi đọc DATABASE_URL
 import threading
 from datetime import datetime
 from pathlib import Path

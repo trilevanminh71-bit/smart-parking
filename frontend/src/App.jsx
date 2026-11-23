@@ -24,6 +24,7 @@ export default function App() {
   })
   const [accounts, setAccounts] = useState(loadAccounts)
   const [switching, setSwitching] = useState(false)
+  const [switchEmail, setSwitchEmail] = useState('')
   const [notice, setNotice] = useState('')
   const authRef = useRef(auth)
   authRef.current = auth
@@ -34,6 +35,7 @@ export default function App() {
     setAccounts(loadAccounts())
     setAuth(a)
     setSwitching(false)
+    setSwitchEmail('')
     setNotice('')
   }, [])
 
@@ -82,25 +84,34 @@ export default function App() {
     setNotice(email ? `Đã đăng xuất ${email}.` : 'Đã đăng xuất.')
   }, [])
 
+  // Menu tài khoản: "Chuyển sang Bảo vệ / Khách hàng / Quản trị viên"
+  const ROLE_EMAIL = { guard: 'guard@smartparking.vn', admin: 'trilevanminh71@gmail.com' }
+  const switchRole = useCallback((role, saved) => {
+    if (saved?.token && tokenValid(saved.token)) return login({ token: saved.token, user: saved.user })
+    setSwitchEmail(saved?.email || ROLE_EMAIL[role] || '')
+    setSwitching(true)
+  }, [login]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const showAuth = !auth || switching
 
   return (
     <ToastProvider>
       {showAuth ? (
         <AuthScreen
-          key={switching ? 'switch' : 'login'}
+          key={switching ? `switch:${switchEmail}` : 'login'}
+          initialEmail={switchEmail}
           accounts={accounts}
           currentEmail={auth?.user?.email}
           notice={notice}
           onAuth={login}
           onPick={(a) => login({ token: a.token, user: a.user })}
           onForget={(email) => { forgetAccount(email); setAccounts(loadAccounts()) }}
-          onCancel={auth ? () => setSwitching(false) : undefined}
+          onCancel={auth ? () => { setSwitching(false); setSwitchEmail('') } : undefined}
         />
       ) : (
         // key = tài khoản: đổi tài khoản -> kết nối realtime mới (xác thực lại WebSocket), GPS theo tài khoản mới
         <GeoProvider user={auth.user} key={auth.user.id}>
-          <Main auth={auth} onSwitch={() => setSwitching(true)} onLogout={logout} refreshUser={refreshUser}
+          <Main auth={auth} accounts={accounts} onSwitch={() => { setSwitchEmail(''); setSwitching(true) }} onSwitchRole={switchRole} onLogout={logout} refreshUser={refreshUser}
             onToken={(token) => login({ ...auth, token })} />
         </GeoProvider>
       )}
@@ -126,7 +137,7 @@ function GpsChip() {
   )
 }
 
-function Main({ auth, onSwitch, onLogout, onToken, refreshUser }) {
+function Main({ auth, accounts, onSwitch, onSwitchRole, onLogout, onToken, refreshUser }) {
   const user = auth.user
   const isStaff = user.role === 'admin' || user.role === 'guard'
   const [mode, setMode] = useState(() => {
@@ -180,10 +191,10 @@ function Main({ auth, onSwitch, onLogout, onToken, refreshUser }) {
       <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-3">
           <div className="flex min-w-0 items-center gap-2">
-            <div className="shrink-0 rounded-xl bg-sky-500 p-1.5"><ParkingSquare className="h-5 w-5 text-white sm:h-6 sm:w-6" /></div>
-            <div className="hidden min-w-0 sm:block">
+            <div className="shrink-0 rounded-xl bg-sky-500 p-1.5" title={parkingName}><ParkingSquare className="h-5 w-5 text-white sm:h-6 sm:w-6" /></div>
+            <div className="hidden min-w-0 xl:block">
               <h1 className="truncate text-lg font-bold leading-tight">{parkingName}</h1>
-              <p className="text-xs text-slate-300">
+              <p className="truncate text-xs text-slate-300">
                 {view === 'customer' ? `Tìm & đặt chỗ đỗ xe nhanh chóng · ${state?.floors?.length || 3} tầng` : `${state?.floors?.length || 3} tầng · ${state?.slots?.length || 30} ô · ESP32 + Webcam ALPR`}
               </p>
             </div>
@@ -195,6 +206,12 @@ function Main({ auth, onSwitch, onLogout, onToken, refreshUser }) {
               {connected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
               <span className="hidden lg:inline">{connected ? 'Realtime' : 'Mất kết nối'}</span>
             </span>
+            {state?.db_engine === 'sqlite' && (
+              <span data-no-tr className="badge shrink-0 border border-amber-500/50 bg-amber-500/15 font-mono !text-[10px] font-bold tracking-wide text-amber-300 max-[400px]:!hidden"
+                title="Đang chạy CSDL SQLite trên máy (backend/.env chưa có DATABASE_URL) — dữ liệu KHÁC bản Cloud Neon">
+                [LOCAL SQLITE]
+              </span>
+            )}
 
             {isStaff && (
               <div className="flex shrink-0 rounded-xl border border-slate-800 bg-slate-900 p-1">
@@ -216,7 +233,7 @@ function Main({ auth, onSwitch, onLogout, onToken, refreshUser }) {
             </button>
 
             {/* Tài khoản hiện tại: 1 khối duy nhất, bấm mở menu Chuyển tài khoản / Đổi mật khẩu / Đăng xuất */}
-            <AccountMenu user={user} onSwitch={onSwitch} onPassword={() => setAccount(true)} onGuide={() => setGuide(true)} onLogout={onLogout} />
+            <AccountMenu user={user} accounts={accounts} dbEngine={state?.db_engine} onSwitchRole={onSwitchRole} onSwitch={onSwitch} onPassword={() => setAccount(true)} onGuide={() => setGuide(true)} onLogout={onLogout} />
           </div>
         </div>
       </header>

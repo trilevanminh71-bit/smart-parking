@@ -8,7 +8,7 @@ from datetime import timedelta
 from fastapi import HTTPException
 
 import mapcfg
-from database import CONTACT_KEYS, Tx, get_settings, log_activity, now, now_iso, parse_dt, query, query_one
+from database import CONTACT_KEYS, Tx, db_kind, get_settings, log_activity, now, now_iso, parse_dt, query, query_one
 
 
 def fail(message: str, status: int = 400):
@@ -783,6 +783,7 @@ def public_state() -> dict:
         "slots": slots,
         "summary": summary,
         "floors": sorted(summary),
+        "db_engine": db_kind(),  # 'sqlite' (Local) | 'postgresql' (Neon) — trang web hiện huy hiệu [LOCAL SQLITE]
         "settings": {**{k: cfg[k] for k in pub_keys}, "auto_gate": cfg["auto_gate"],
                      "sepay_enabled": bool(cfg["sepay_api_key"].strip() or os.environ.get("SEPAY_API_KEY", "").strip())},
         "server_time": now_iso(),

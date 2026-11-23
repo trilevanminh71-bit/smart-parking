@@ -86,7 +86,8 @@ html:not(.dark) .dot-occupied { background-color: #ef4444; --tw-ring-color: #ef4
 }
 
 /* ---------------- Bản đồ Leaflet ---------------- */
-.leaflet-container { background: #e5e7eb; font-family: inherit; }
+/* Leaflet dùng z-index 400–1000 cho các lớp bản đồ: cô lập trong khung bản đồ để không nổi đè lên Header / menu tài khoản */
+.leaflet-container { background: #e5e7eb; font-family: inherit; isolation: isolate; z-index: 0; }
 html.dark .leaflet-container { background: #0b1220; }
 .leaflet-container .slot-tip { background: transparent; border: 0; box-shadow: none; padding: 0; font-weight: 800; font-size: 11px; color: #0f172a; }
 html.dark .leaflet-container .slot-tip { color: #f8fafc; }
