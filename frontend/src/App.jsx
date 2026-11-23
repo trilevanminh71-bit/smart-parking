@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ParkingSquare, Users, ShieldCheck, Wifi, WifiOff, Repeat, KeyRound, ChevronDown, HelpCircle } from 'lucide-react'
+import { ParkingSquare, Users, ShieldCheck, Wifi, WifiOff, Repeat, KeyRound, ChevronDown, HelpCircle, LocateFixed, LocateOff, Locate } from 'lucide-react'
+import { GeoProvider, useGeo } from './gps.jsx'
 import OnboardingGuide, { guideSeen, markGuideSeen } from './components/OnboardingGuide.jsx'
 import CustomerView from './pages/CustomerView.jsx'
 import AdminView from './pages/AdminView.jsx'
@@ -80,18 +81,41 @@ export default function App() {
           onCancel={auth ? () => setSwitching(false) : undefined}
         />
       ) : (
-        <Main auth={auth} onSwitch={() => setSwitching(true)} refreshUser={refreshUser}
-          onToken={(token) => login({ ...auth, token })} />
+        // key = tài khoản: đổi tài khoản -> kết nối realtime mới (xác thực lại WebSocket), GPS theo tài khoản mới
+        <GeoProvider user={auth.user} key={auth.user.id}>
+          <Main auth={auth} onSwitch={() => setSwitching(true)} refreshUser={refreshUser}
+            onToken={(token) => login({ ...auth, token })} />
+        </GeoProvider>
       )}
     </ToastProvider>
+  )
+}
+
+const ROLE_LABEL = { admin: 'Quản trị viên', guard: 'Bảo vệ trực cổng', customer: 'Khách hàng' }
+
+/** Nút trạng thái GPS trên thanh tiêu đề: bật/tắt chia sẻ vị trí thủ công. */
+function GpsChip() {
+  const geo = useGeo()
+  if (!geo) return null
+  const { status, enabled, toggle, error, sim } = geo
+  const on = status === 'on'
+  const label = sim ? 'GPS giả lập' : !enabled ? 'GPS tắt' : on ? 'GPS bật' : status === 'denied' ? 'GPS bị chặn' : status === 'unsupported' ? 'Không hỗ trợ GPS' : 'Đang định vị…'
+  const tone = on ? 'border-emerald-500/50 text-emerald-300' : status === 'denied' || status === 'error' ? 'border-rose-500/50 text-rose-300' : 'border-slate-800 text-slate-400'
+  return (
+    <button onClick={() => toggle()} title={error || `${label} — bấm để ${enabled ? 'tắt' : 'bật'} định vị`} aria-pressed={enabled}
+      className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1 rounded-xl border bg-slate-900 px-2 text-sm ${tone}`}>
+      {on ? <LocateFixed className="h-4 w-4" /> : enabled ? <Locate className="h-4 w-4 animate-pulse" /> : <LocateOff className="h-4 w-4" />}
+      <span className="hidden xl:inline">{label}</span>
+    </button>
   )
 }
 
 function Main({ auth, onSwitch, onToken, refreshUser }) {
   const user = auth.user
   const isAdmin = user.role === 'admin'
+  const isStaff = user.role === 'admin' || user.role === 'guard'
   const [mode, setMode] = useState(() => {
-    try { return localStorage.getItem(MODE_KEY) || 'customer' } catch { return 'customer' }
+    try { return localStorage.getItem(MODE_KEY) || (user.role === 'guard' ? 'admin' : 'customer') } catch { return 'customer' }
   })
   const [state, setState] = useState(null)
   const [tick, setTick] = useState(0)
@@ -102,7 +126,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
   const [guide, setGuide] = useState(false)
   const timer = useRef()
   const now = useNow(1000)
-  const view = isAdmin ? mode : 'customer' // khách hàng không thể vào trang Admin
+  const view = isStaff ? mode : 'customer' // khách hàng không thể vào trang Bảo vệ / Admin
 
   const load = useCallback(async () => {
     try {
@@ -148,7 +172,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
             <div className="hidden min-w-0 sm:block">
               <h1 className="truncate text-lg font-bold leading-tight">{parkingName}</h1>
               <p className="text-xs text-slate-300">
-                {view === 'customer' ? 'Tìm & đặt chỗ đỗ xe nhanh chóng · 3 tầng' : '3 tầng · 30 ô · ESP32 + ALPR giả lập'}
+                {view === 'customer' ? `Tìm & đặt chỗ đỗ xe nhanh chóng · ${state?.floors?.length || 3} tầng` : `${state?.floors?.length || 3} tầng · ${state?.slots?.length || 30} ô · ESP32 + Webcam ALPR`}
               </p>
             </div>
           </div>
@@ -160,7 +184,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
               <span className="hidden lg:inline">{connected ? 'Realtime' : 'Mất kết nối'}</span>
             </span>
 
-            {isAdmin && (
+            {isStaff && (
               <div className="flex shrink-0 rounded-xl border border-slate-800 bg-slate-900 p-1">
                 {[['customer', 'Khách hàng', Users], ['admin', 'Bảo vệ', ShieldCheck]].map(([id, label, I]) => (
                   <button key={id} onClick={() => setMode(id)} title={label}
@@ -171,6 +195,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
               </div>
             )}
 
+            <GpsChip />
             <PrefsControls />
 
             <button onClick={() => setGuide(true)} title="Hướng dẫn sử dụng" aria-label="Hướng dẫn sử dụng"
@@ -182,7 +207,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
             <div className="relative min-w-0">
               <button onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-haspopup="menu"
                 className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 py-1 pl-1 pr-2 hover:border-slate-600">
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isAdmin ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-200'}`}>{initials}</span>
+                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isAdmin ? 'bg-sky-500 text-white' : isStaff ? 'bg-amber-500 text-slate-950' : 'bg-slate-700 text-slate-200'}`}>{initials}</span>
                 <span className="hidden min-w-0 text-left min-[480px]:block">
                   <span className="block max-w-[96px] truncate text-xs font-semibold leading-tight sm:max-w-[160px] sm:text-sm">{user.full_name}</span>
                   <span className="hidden max-w-[160px] truncate text-[11px] leading-tight text-slate-400 md:block">{user.email}</span>
@@ -198,7 +223,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
                       <div className="font-semibold">{user.full_name}</div>
                       <div className="break-all text-xs text-slate-400">{user.email}</div>
                       <div className="mt-1 text-xs text-slate-500">
-                        {isAdmin ? 'Quản trị viên / Bảo vệ' : 'Khách hàng'}
+                        {ROLE_LABEL[user.role] || 'Khách hàng'}
                         {user.phone ? ` · ${user.phone}` : ''}{user.default_plate ? ` · ${user.default_plate}` : ''}
                       </div>
                     </div>
@@ -240,7 +265,7 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
 
       {view === 'customer'
         ? <footer className="pb-[calc(6rem+env(safe-area-inset-bottom))] text-center text-xs text-slate-400 sm:pb-6">{parkingName} · Đặt chỗ trực tuyến</footer>
-        : <footer className="pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-center text-xs text-slate-600">Smart Parking · FastAPI + SQLite + React</footer>}
+        : <footer className="pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-center text-xs text-slate-500">Smart Parking v3 · FastAPI + PostgreSQL + React · ESP32 + Webcam ALPR</footer>}
 
       <AccountModal open={account} onClose={() => setAccount(false)} user={user} onToken={onToken} />
       <OnboardingGuide open={guide} settings={state?.settings} onClose={() => setGuide(false)}

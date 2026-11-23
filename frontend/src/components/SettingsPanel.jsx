@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Settings, Save, Loader2, RotateCcw, Headset, ShieldCheck, Copy, Eye, EyeOff } from 'lucide-react'
 import { api } from '../api.js'
 
-const NUM = ['hold_minutes', 'deposit_amount', 'hourly_rate', 'exit_grace_minutes']
+const NUM = ['hold_minutes', 'deposit_amount', 'hourly_rate', 'exit_grace_minutes', 'free_minutes', 'pending_minutes']
 const TEXT = ['parking_name', 'admin_name', 'admin_phone', 'admin_email', 'parking_address', 'notice_text']
 
 export default function SettingsPanel({ toast }) {
@@ -24,13 +24,13 @@ export default function SettingsPanel({ toast }) {
     try {
       const body = Object.fromEntries(keys.map((k) => [k, NUM.includes(k) ? Number(form[k]) : form[k]]))
       setForm(await api('/api/admin/settings', { method: 'PUT', body }))
-      toast(`Đã lưu ${label} xuống SQLite`, 'success')
+      toast(`Đã lưu ${label} vào cơ sở dữ liệu`, 'success')
     } catch (err) { toast(err.message, 'error') } finally { setBusy('') }
   }
 
   const reset = async () => {
-    if (!confirm('Xóa toàn bộ đặt chỗ, lượt gửi xe, log phần cứng và trả tất cả ô về trống? (Giữ nguyên cài đặt, tài khoản và lịch sử hoạt động)')) return
-    try { await api('/api/admin/reset', { method: 'POST' }); toast('Đã reset dữ liệu demo', 'success') } catch (err) { toast(err.message, 'error') }
+    if (!confirm('Trả tất cả ô về trống, hủy đơn đang giữ và kết thúc 0đ các xe đang đỗ? (GIỮ lịch sử doanh thu, nhật ký thanh toán, cài đặt và tài khoản)')) return
+    try { const r = await api('/api/admin/reset', { method: 'POST' }); toast(r.message || 'Đã reset bãi xe', 'success') } catch (err) { toast(err.message, 'error') }
   }
 
   const field = (k, label, props = {}) => (
@@ -44,8 +44,10 @@ export default function SettingsPanel({ toast }) {
     <div className="space-y-4 sm:space-y-5">
       <form className="card" onSubmit={save(NUM, 'cài đặt đặt chỗ')}>
         <div className="card-title"><Settings className="h-4 w-4" /> Cài đặt đặt chỗ & tính phí</div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {field('hold_minutes', 'Thời gian giữ chỗ (phút)', { type: 'number', inputMode: 'numeric', min: 1, max: 1440, required: true })}
+          {field('pending_minutes', 'Chờ chuyển khoản cọc tối đa (phút)', { type: 'number', inputMode: 'numeric', min: 1, max: 120, required: true })}
+          {field('free_minutes', 'Miễn phí thời gian đầu (phút)', { type: 'number', inputMode: 'numeric', min: 0, max: 1440, required: true })}
           {field('deposit_amount', 'Tiền đặt cọc (VNĐ)', { type: 'number', inputMode: 'numeric', min: 0, step: 1000, required: true })}
           {field('hourly_rate', 'Đơn giá theo giờ (VNĐ/giờ)', { type: 'number', inputMode: 'numeric', min: 0, step: 1000, required: true })}
           {field('exit_grace_minutes', 'Thời gian ra cổng sau thanh toán (phút)', { type: 'number', inputMode: 'numeric', min: 1, max: 240, required: true })}
@@ -55,11 +57,12 @@ export default function SettingsPanel({ toast }) {
           là tự mở barrier. Quá hạn → chặn barrier, tính phí phát sinh thêm để trả bù.
         </p>
         <p className="mt-2 text-xs text-slate-500">
-          Khách đặt chỗ → ô "Chờ chuyển khoản" tối đa 5 phút → tiền vào (SePay) hoặc Bảo vệ bấm Duyệt cọc → giữ chỗ theo thời gian trên.
+          Khách đặt chỗ → ô "Chờ chuyển khoản" tối đa {form.pending_minutes || 10} phút → tiền vào (SePay) hoặc Bảo vệ bấm Duyệt cọc → giữ chỗ theo thời gian trên.
+          Phí gửi: miễn phí {form.free_minutes ?? 15} phút đầu, sau đó tính theo block giờ (làm tròn lên) và tự trừ tiền cọc; phí ≤ cọc thì barrier cổng ra tự mở.
           Thay đổi áp dụng cho các đặt chỗ / lượt tính tiền mới.
         </p>
         <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-          <button type="button" className="btn-ghost" onClick={reset}><RotateCcw className="h-4 w-4" /> Reset dữ liệu demo</button>
+          <button type="button" className="btn-ghost" onClick={reset}><RotateCcw className="h-4 w-4" /> Reset bãi xe (giữ doanh thu)</button>
           <button className="btn-primary" disabled={!!busy}>{busy === 'cài đặt đặt chỗ' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Lưu cài đặt</button>
         </div>
       </form>

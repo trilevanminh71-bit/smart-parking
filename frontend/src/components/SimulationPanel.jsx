@@ -7,7 +7,7 @@ import { api, useEvent } from '../api.js'
 const SAMPLES = ['65A-123.45', '51G-678.90', '30H-246.81', '43A-135.79', '59X1-234.56', '29C-112.23']
 
 /** Ảnh biển số mẫu vẽ bằng SVG (không cần file ảnh). */
-function PlateImage({ plate, small }) {
+export function PlateImage({ plate, small }) {
   const [top, bottom] = plate.includes('-') ? plate.split('-') : [plate, '']
   return (
     <svg viewBox="0 0 140 64" className={small ? 'h-9 w-auto' : 'h-16 w-auto'}>

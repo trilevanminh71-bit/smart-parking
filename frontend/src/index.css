@@ -84,3 +84,15 @@ html:not(.dark) .dot-occupied { background-color: #ef4444; --tw-ring-color: #ef4
   .print-area { position: fixed; inset: 0; margin: 0 auto; }
   .print-area img { width: 100%; max-width: 720px; height: auto; }
 }
+
+/* ---------------- Bản đồ Leaflet ---------------- */
+.leaflet-container { background: #e5e7eb; font-family: inherit; }
+html.dark .leaflet-container { background: #0b1220; }
+.leaflet-container .slot-tip { background: transparent; border: 0; box-shadow: none; padding: 0; font-weight: 800; font-size: 11px; color: #0f172a; }
+html.dark .leaflet-container .slot-tip { color: #f8fafc; }
+.leaflet-container .slot-tip::before { display: none; }
+.leaflet-flash { animation: leaflet-flash 0.6s ease-in-out infinite alternate; }
+@keyframes leaflet-flash { from { fill-opacity: 0.25; stroke-opacity: 0.5; } to { fill-opacity: 0.85; stroke-opacity: 1; } }
+html.dark .leaflet-control-attribution { background: rgba(15, 23, 42, 0.75); color: #94a3b8; }
+html.dark .leaflet-control-attribution a { color: #7dd3fc; }
+html.dark .leaflet-bar a { background: #0f172a; color: #e2e8f0; border-color: #1e293b; }

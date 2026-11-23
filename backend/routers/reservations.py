@@ -28,7 +28,7 @@ async def create(body: ReservationCreate, user: dict = Depends(auth.current_user
 @router.get("/{rid}")
 def get(rid: int, user: dict = Depends(auth.current_user)):
     res = svc.get_reservation(rid)
-    if user["role"] != "admin" and res.get("user_id") != user["id"]:
+    if not auth.is_staff(user) and res.get("user_id") != user["id"]:
         svc.fail("Không tìm thấy đặt chỗ", 404)
     return res
 

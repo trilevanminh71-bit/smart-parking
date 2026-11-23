@@ -25,6 +25,7 @@ _conn = None
 _RE_INSERT_IGNORE = re.compile(r"^\s*INSERT\s+OR\s+IGNORE\s+INTO", re.I)
 _RE_INSERT_REPLACE_SETTINGS = re.compile(r"^\s*INSERT\s+OR\s+REPLACE\s+INTO\s+settings", re.I)
 _RE_INSERT = re.compile(r"^\s*INSERT\s+INTO\s+(\w+)", re.I)
+_NO_ID_TABLES = {"settings", "telemetry_locations"}  # bảng không có cột id -> không thêm RETURNING id
 
 
 def _pg_sql(sql: str, has_params: bool) -> tuple[str, bool]:
@@ -41,7 +42,7 @@ def _pg_sql(sql: str, has_params: bool) -> tuple[str, bool]:
         s = _RE_INSERT_IGNORE.sub("INSERT INTO", s) + " ON CONFLICT DO NOTHING"
     s = re.sub(r"\bLIKE\b", "ILIKE", s)  # SQLite LIKE không phân biệt hoa/thường
     m = _RE_INSERT.match(s)
-    if m and m.group(1).lower() != "settings":
+    if m and m.group(1).lower() not in _NO_ID_TABLES:
         return s + " RETURNING id", True
     return s, False
 
@@ -108,6 +109,10 @@ DEFAULT_SETTINGS = {
     "hourly_rate": "10000",
     # Thời gian tối đa từ lúc thanh toán trước tới lúc xe ra khỏi cổng
     "exit_grace_minutes": "15",
+    # Miễn phí N phút đầu (đỗ <= N phút: 0đ); sau đó tính theo block giờ, làm tròn lên
+    "free_minutes": "15",
+    # Đơn `pending_payment` quá N phút chưa nhận webhook SePay -> tự hủy, trả ô
+    "pending_minutes": "10",
     # Auto-Gate: có tín hiệu xe tới cổng (ESP32 / nút giả lập) -> tự đọc biển số, check-in/out và mở barrier
     "auto_gate": "0",
     # API Key SePay: webhook /api/payment/webhook phải gửi header `Authorization: Apikey <key>`
@@ -121,11 +126,10 @@ DEFAULT_SETTINGS = {
     "notice_text": "",
 }
 
-INT_SETTINGS = ("hold_minutes", "deposit_amount", "hourly_rate", "exit_grace_minutes")
+INT_SETTINGS = ("hold_minutes", "deposit_amount", "hourly_rate", "exit_grace_minutes", "free_minutes", "pending_minutes")
 TEXT_SETTINGS = ("parking_name", "admin_name", "admin_phone", "admin_email", "parking_address", "notice_text")
 CONTACT_KEYS = TEXT_SETTINGS
 SECRET_SETTINGS = ("sepay_api_key",)  # chỉ Admin xem được, không đưa ra trang khách
-PENDING_PAYMENT_MINUTES = 5  # thời gian chờ tiền cọc về tài khoản trước khi tự hủy
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -227,6 +231,23 @@ CREATE TABLE IF NOT EXISTS payment_receipts (
     resolved_at    TEXT,
     created_at     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS parking_maps (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    config     TEXT NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS telemetry_locations (
+    user_id    INTEGER PRIMARY KEY,
+    email      TEXT NOT NULL DEFAULT '',
+    lat        REAL NOT NULL,
+    lng        REAL NOT NULL,
+    accuracy   REAL,
+    speed      REAL,
+    heading    REAL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_pay_created ON payment_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_rcpt_res ON payment_receipts(reservation_id);
 CREATE INDEX IF NOT EXISTS idx_act_user ON activity_logs(user_id);
@@ -322,7 +343,9 @@ def seed_slots(db) -> None:
 # Cột bổ sung cho DB cũ (tự thêm nếu thiếu)
 MIGRATIONS = {
     "reservations": [("user_id", "INTEGER REFERENCES users(id)"), ("ticket_code", "TEXT"),
-                     ("deposit_mode", "TEXT NOT NULL DEFAULT 'deposit'")],  # luôn 'deposit'; 'none' chỉ còn ở lịch sử cũ
+                     # 'deposit' | 'admin_free' | 'demo' (cọc giả lập từ Bảng Demo, không tính doanh thu); 'none' chỉ còn ở lịch sử cũ
+                     ("deposit_mode", "TEXT NOT NULL DEFAULT 'deposit'"),
+                     ("parked_at", "TEXT")],  # khách / Bảo vệ xác nhận xe đã đỗ đúng ô
     "parking_sessions": [("user_id", "INTEGER REFERENCES users(id)"),
                          ("fee_waived", "INTEGER NOT NULL DEFAULT 0"),  # 1 = miễn phí (Admin)
                          # Thanh toán trước khi ra cổng (payment_status = 'paid_ready')
@@ -333,7 +356,10 @@ MIGRATIONS = {
                          ("prepaid_total", "INTEGER"),
                          ("exit_deadline", "TEXT"),       # hạn ra cổng = lúc trả + exit_grace_minutes
                          ("prepay_due", "INTEGER"),       # số tiền đã hiện trên VietQR khi khách bấm thanh toán trước
-                         ("prepay_requested_at", "TEXT")],
+                         ("prepay_requested_at", "TEXT"),
+                         ("parked_confirmed_at", "TEXT")],  # đã xác nhận đỗ đúng ô (tắt dẫn đường, không báo đỗ nhầm)
+    # active = 0: ô đã bị xóa khỏi sơ đồ (giữ dòng để không mất lịch sử đặt chỗ / lượt gửi)
+    "slots": [("active", "INTEGER NOT NULL DEFAULT 1")],
     "users": [("default_plate", "TEXT NOT NULL DEFAULT ''")],
     # Ảnh biên lai lưu thẳng trong CSDL (base64) để không mất khi server Cloud khởi động lại
     "payment_receipts": [("receipt_data", "TEXT"), ("receipt_mime", "TEXT")],
@@ -394,10 +420,9 @@ def log_activity(db, user_id, email: str, action: str, details: str = "") -> Non
     )
 
 
-def reset_all() -> None:
-    """Xóa toàn bộ dữ liệu giao dịch (giữ cài đặt) — dùng khi demo."""
-    with Tx() as db:
-        db.execute("DELETE FROM parking_sessions")
-        db.execute("DELETE FROM reservations")
-        db.execute("DELETE FROM hardware_logs")
-        db.execute("UPDATE slots SET status = 'available'")
+def ensure_slot(db, code: str, floor: int) -> None:
+    """Thêm ô mới (Trình chỉnh sửa bản đồ) hoặc kích hoạt lại ô đã xóa trước đó."""
+    if db.execute("SELECT 1 FROM slots WHERE code = ?", (code,)).fetchone():
+        db.execute("UPDATE slots SET active = 1, floor = ? WHERE code = ?", (floor, code))
+    else:
+        db.execute("INSERT INTO slots (code, floor, status, active) VALUES (?, ?, 'available', 1)", (code, floor))

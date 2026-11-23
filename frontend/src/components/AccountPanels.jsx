@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Loader2, Save, UserPlus, Users, ShieldCheck, ShieldOff, Trash2, AlertTriangle } from 'lucide-react'
+import { KeyRound, Loader2, Save, UserPlus, Users, ShieldCheck, Trash2, AlertTriangle } from 'lucide-react'
 import { Modal, useToast } from './ui.jsx'
 import { api, fmtTime } from '../api.js'
 
@@ -40,7 +40,7 @@ export function AccountModal({ open, onClose, user, onToken }) {
       <div className="mb-4 rounded-xl bg-slate-950/60 p-3 text-sm">
         <div className="font-semibold">{user?.full_name}</div>
         <div className="break-all text-slate-400">{user?.email}{user?.phone ? ` · ${user.phone}` : ''}</div>
-        <div className="mt-1 text-xs text-sky-300">{user?.role === 'admin' ? 'Quản trị viên / Bảo vệ' : 'Khách hàng'}</div>
+        <div className="mt-1 text-xs text-sky-300">{ROLE_VI[user?.role] || 'Khách hàng'}</div>
       </div>
       <ChangePasswordForm onDone={onClose} onToken={onToken} />
     </Modal>
@@ -48,10 +48,13 @@ export function AccountModal({ open, onClose, user, onToken }) {
 }
 
 /** Quản lý tài khoản Admin: tạo admin mới / nâng quyền, danh sách tài khoản, đổi mật khẩu. */
+const ROLE_VI = { admin: 'Quản trị viên', guard: 'Bảo vệ trực cổng', customer: 'Khách hàng' }
+const ROLE_BADGE = { admin: 'bg-sky-500/20 text-sky-300', guard: 'bg-amber-500/20 text-amber-300', customer: 'bg-slate-700 text-slate-300' }
+
 export function AdminAccountsPanel({ me, onToken }) {
   const toast = useToast()
   const [users, setUsers] = useState([])
-  const [f, setF] = useState({ email: '', full_name: '', phone: '', password: '' })
+  const [f, setF] = useState({ email: '', full_name: '', phone: '', password: '', role: 'guard' })
   const [busy, setBusy] = useState(false)
   const [deleting, setDeleting] = useState(null)
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }))
@@ -65,16 +68,18 @@ export function AdminAccountsPanel({ me, onToken }) {
     e.preventDefault()
     setBusy(true)
     try {
-      const body = existing ? { email: f.email } : f
+      const body = existing ? { email: f.email, role: f.role } : f
       const r = await api('/api/admin/users', { method: 'POST', body })
-      toast(r.action === 'promoted' ? `Đã nâng quyền ${r.user.email} lên Admin` : `Đã tạo tài khoản Admin ${r.user.email}`, 'success')
-      setF({ email: '', full_name: '', phone: '', password: '' })
+      const rv = f.role === 'admin' ? 'Admin' : 'Bảo vệ'
+      toast(r.action === 'promoted' ? `Đã đổi quyền ${r.user.email} thành ${rv}` : `Đã tạo tài khoản ${rv} ${r.user.email}`, 'success')
+      setF({ email: '', full_name: '', phone: '', password: '', role: f.role })
       load()
     } catch (err) { toast(err.message, 'error') } finally { setBusy(false) }
   }
 
   const setRole = async (u, role) => {
-    if (!confirm(`${role === 'admin' ? 'Nâng' : 'Hạ'} quyền ${u.email} thành ${role === 'admin' ? 'Admin' : 'Khách hàng'}?`)) return
+    if (role === u.role) return
+    if (!confirm(`Đổi quyền ${u.email} thành ${ROLE_VI[role]}?`)) return
     try { await api(`/api/admin/users/${u.id}/role`, { method: 'PUT', body: { role } }); toast('Đã cập nhật quyền', 'success'); load() } catch (err) { toast(err.message, 'error') }
   }
 
@@ -82,12 +87,18 @@ export function AdminAccountsPanel({ me, onToken }) {
     <div className="grid gap-5 lg:grid-cols-[1fr_1.3fr]">
       <div className="space-y-5">
         <form className="card space-y-3" onSubmit={submit}>
-          <div className="card-title !mb-1"><UserPlus className="h-4 w-4" /> Tạo thêm tài khoản Admin</div>
-          <p className="text-xs text-slate-500">Nhập email của tài khoản đã có để nâng quyền lên Admin, hoặc email mới để tạo tài khoản Admin mới.</p>
+          <div className="card-title !mb-1"><UserPlus className="h-4 w-4" /> Tạo tài khoản Bảo vệ / Admin</div>
+          <p className="text-xs text-slate-500">Nhập email đã có để đổi quyền, hoặc email mới để tạo tài khoản. Bảo vệ: vận hành cổng, barrier khẩn cấp, thu tiền mặt; không sửa bản đồ, không xóa dữ liệu.</p>
+          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-950/70 p-1">
+            {[['guard', 'Bảo vệ'], ['admin', 'Admin']].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setF((x) => ({ ...x, role: id }))}
+                className={`min-h-[40px] rounded-lg text-sm font-medium ${f.role === id ? 'bg-sky-500 text-white' : 'text-slate-400'}`}>{label}</button>
+            ))}
+          </div>
           <div><label className="label">Email</label><input className="input" type="email" inputMode="email" value={f.email} onChange={set('email')} required /></div>
           {existing ? (
             <div className="rounded-lg bg-sky-500/10 px-3 py-2 text-sm text-sky-200">
-              Đã có tài khoản <b>{existing.full_name}</b> ({existing.role === 'admin' ? 'đang là Admin' : 'Khách hàng'}).
+              Đã có tài khoản <b>{existing.full_name}</b> (đang là {ROLE_VI[existing.role] || 'Khách hàng'}).
             </div>
           ) : (
             <>
@@ -96,9 +107,9 @@ export function AdminAccountsPanel({ me, onToken }) {
               <div><label className="label">Mật khẩu (≥ 6 ký tự)</label><input className="input" type="password" autoComplete="new-password" value={f.password} onChange={set('password')} required /></div>
             </>
           )}
-          <button className="btn-primary w-full" disabled={busy || existing?.role === 'admin'}>
+          <button className="btn-primary w-full" disabled={busy || existing?.role === f.role}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-            {existing ? 'Nâng quyền lên Admin' : 'Tạo tài khoản Admin'}
+            {existing ? `Đổi quyền thành ${f.role === 'admin' ? 'Admin' : 'Bảo vệ'}` : `Tạo tài khoản ${f.role === 'admin' ? 'Admin' : 'Bảo vệ'}`}
           </button>
         </form>
         <div className="card">
@@ -116,14 +127,14 @@ export function AdminAccountsPanel({ me, onToken }) {
                 <div className="font-medium">{u.full_name} {u.id === me.id && <span className="text-xs text-slate-500">(bạn)</span>}</div>
                 <div className="break-all text-xs text-slate-400">{u.email}{u.phone ? ` · ${u.phone}` : ''} · tạo {fmtTime(u.created_at)}</div>
               </div>
-              <span className={`badge ${u.role === 'admin' ? 'bg-sky-500/20 text-sky-300' : 'bg-slate-700 text-slate-300'}`}>
-                {u.email === ROOT_ADMIN ? 'Admin gốc' : u.role === 'admin' ? 'Admin' : 'Khách hàng'}
+              <span className={`badge ${ROLE_BADGE[u.role] || ROLE_BADGE.customer}`}>
+                {u.email === ROOT_ADMIN ? 'Admin gốc' : ROLE_VI[u.role] || 'Khách hàng'}
               </span>
               {u.id !== me.id && u.email !== ROOT_ADMIN && (
                 <div className="flex gap-1.5">
-                  {u.role === 'admin'
-                    ? <button className="btn-ghost btn-sm" onClick={() => setRole(u, 'customer')}><ShieldOff className="h-3.5 w-3.5" /> Hạ quyền</button>
-                    : <button className="btn-ghost btn-sm" onClick={() => setRole(u, 'admin')}><ShieldCheck className="h-3.5 w-3.5" /> Lên Admin</button>}
+                  <select className="input !min-h-[38px] !w-auto !py-1 text-xs" value={u.role} onChange={(e) => setRole(u, e.target.value)} aria-label={`Quyền của ${u.email}`}>
+                    <option value="customer">Khách hàng</option><option value="guard">Bảo vệ</option><option value="admin">Admin</option>
+                  </select>
                   <button className="btn-sm btn border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/25"
                     onClick={() => setDeleting(u)} aria-label={`Xóa tài khoản ${u.email}`}>
                     <Trash2 className="h-3.5 w-3.5" /> Xóa
@@ -166,7 +177,7 @@ function DeleteUserModal({ user, onClose, onDeleted }) {
         <div className="rounded-xl bg-slate-950/60 p-3">
           <div className="font-semibold">{user.full_name}</div>
           <div className="break-all text-slate-400">{user.email}{user.phone ? ` · ${user.phone}` : ''}</div>
-          <div className="mt-1 text-xs text-slate-500">{user.role === 'admin' ? 'Admin' : 'Khách hàng'} · tạo {fmtTime(user.created_at)}</div>
+          <div className="mt-1 text-xs text-slate-500">{ROLE_VI[user.role] || 'Khách hàng'} · tạo {fmtTime(user.created_at)}</div>
         </div>
         <ul className="list-disc space-y-1 pl-5 text-slate-300">
           <li>Tài khoản bị xóa vĩnh viễn và đăng xuất ngay trên mọi thiết bị.</li>

@@ -7,8 +7,8 @@ from datetime import timedelta
 
 from fastapi import HTTPException
 
-from database import (CONTACT_KEYS, PENDING_PAYMENT_MINUTES, Tx, get_settings, log_activity, now, now_iso, parse_dt,
-                      query, query_one)
+import mapcfg
+from database import CONTACT_KEYS, Tx, get_settings, log_activity, now, now_iso, parse_dt, query, query_one
 
 
 def fail(message: str, status: int = 400):
@@ -146,7 +146,7 @@ def _is_admin(db, uid) -> bool:
 def create_reservation(slot_code: str, plate: str, name: str, phone: str, user_id: int | None = None,
                        ticket_code: str | None = None, free: bool = False) -> dict:
     """Tạo đặt chỗ CÓ ĐẶT CỌC qua VietQR MB Bank (hình thức duy nhất).
-    Luôn tạo `pending_payment` (ô `pending_payment`) tối đa PENDING_PAYMENT_MINUTES phút để chờ tiền về.
+    Luôn tạo `pending_payment` (ô `pending_payment`) tối đa `pending_minutes` phút (Cài đặt, mặc định 10) để chờ tiền về.
     Tiền vào (webhook SePay) hoặc Bảo vệ duyệt tay -> `active` / ô `reserved`, giữ chỗ `hold_minutes` phút.
     """
     plate = normalize_plate(plate)
@@ -156,7 +156,7 @@ def create_reservation(slot_code: str, plate: str, name: str, phone: str, user_i
     cfg = get_settings()
     with Tx() as db:
         slot = get_slot(db, slot_code)
-        if slot["status"] != "available":
+        if slot["status"] != "available" or not slot.get("active", 1):
             fail(f"Ô {slot['code']} không còn trống")
         if db.execute(f"SELECT 1 FROM reservations WHERE license_plate = ? AND status IN {HOLD_STATUSES}", (plate,)).fetchone():
             fail(f"Xe {plate} đã có đặt chỗ đang giữ")
@@ -176,7 +176,7 @@ def create_reservation(slot_code: str, plate: str, name: str, phone: str, user_i
             expires = created + timedelta(minutes=cfg["hold_minutes"])
         else:
             amount, paid, status, mode = cfg["deposit_amount"], 0, "pending_payment", "deposit"
-            expires = created + timedelta(minutes=PENDING_PAYMENT_MINUTES)
+            expires = created + timedelta(minutes=cfg["pending_minutes"])
         cur = db.execute(
             """INSERT INTO reservations (slot_id, license_plate, customer_name, phone, deposit_amount,
                deposit_paid, status, created_at, expires_at, user_id, ticket_code, deposit_mode)
@@ -193,7 +193,7 @@ def create_reservation(slot_code: str, plate: str, name: str, phone: str, user_i
         if free:
             desc, action = f"miễn phí (Admin) — giữ chỗ {cfg['hold_minutes']} phút", "reservation_free"
         else:
-            desc, action = f"cọc {amount:,}đ — chờ chuyển khoản (tối đa {PENDING_PAYMENT_MINUTES} phút)", "reservation_pending"
+            desc, action = f"cọc {amount:,}đ — chờ chuyển khoản (tối đa {cfg['pending_minutes']} phút)", "reservation_pending"
         log(db, "web", "reservation", f"{plate} đặt ô {slot['code']}, {desc} (vé {code})")
         log_activity(db, user_id, _user_email(db, user_id), action, f"Ô {slot['code']} · {plate} · vé {code} · {desc}")
     return get_reservation(rid)
@@ -234,7 +234,7 @@ def activate_reservation_tx(db, r, via: str = "manual", admin: dict | None = Non
             fail(f"Xe {r['license_plate']} đã có đặt chỗ khác đang giữ")
         if db.execute("SELECT 1 FROM parking_sessions WHERE license_plate = ? AND status = 'parked'", (r["license_plate"],)).fetchone():
             fail(f"Xe {r['license_plate']} đang đỗ trong bãi")
-    elif r["status"] in ("active", "checked_in"):
+    elif r["status"] in ("active", "checked_in", "parked"):
         fail(f"Vé {r['ticket_code']} đã được xác nhận cọc trước đó")
     else:
         fail("Đặt chỗ này không ở trạng thái chờ chuyển khoản")
@@ -242,8 +242,9 @@ def activate_reservation_tx(db, r, via: str = "manual", admin: dict | None = Non
     expires = (now() + timedelta(minutes=cfg["hold_minutes"])).isoformat(timespec="seconds")
     db.execute("UPDATE reservations SET status = 'active', deposit_paid = 1, expires_at = ? WHERE id = ?", (expires, r["id"]))
     db.execute("UPDATE slots SET status = 'reserved' WHERE id = ?", (r["slot_id"],))
-    how = {"sepay": "tự động qua SePay", "manual": "Bảo vệ duyệt tay", "reconcile": "duyệt bù khi đối soát"}.get(via, via)
-    log(db, "sepay" if via == "sepay" else "admin", "deposit_approve",
+    how = {"sepay": "tự động qua SePay", "manual": "Bảo vệ duyệt tay", "reconcile": "duyệt bù khi đối soát",
+           "demo": "giả lập SePay (Bảng Demo — không tính doanh thu)"}.get(via, via)
+    log(db, {"sepay": "sepay", "demo": "simulator"}.get(via, "admin"), "deposit_approve",
         f"Xác nhận cọc {r['deposit_amount']:,}đ vé {r['ticket_code']} ({r['license_plate']}) ô {slot['code']} — {how}")
     if admin:
         log_activity(db, admin["id"], admin["email"], "deposit_approve" if via == "manual" else "payment_reconcile",
@@ -289,14 +290,14 @@ def cancel_reservation(rid: int, user: dict | None = None) -> dict:
         r = db.execute("SELECT * FROM reservations WHERE id = ?", (rid,)).fetchone()
         if not r:
             fail("Không tìm thấy đặt chỗ", 404)
-        if user and user["role"] != "admin" and r["user_id"] != user["id"]:
+        if user and user["role"] not in ("admin", "guard") and r["user_id"] != user["id"]:
             fail("Bạn không có quyền hủy đặt chỗ này", 403)
         if r["status"] not in HOLD_STATUSES:
             fail("Đặt chỗ này không còn hiệu lực")
         db.execute("UPDATE reservations SET status = 'cancelled' WHERE id = ?", (rid,))
         db.execute(f"UPDATE slots SET status = 'available' WHERE id = ? AND status IN {SLOT_HELD}", (r["slot_id"],))
         code = db.execute("SELECT code FROM slots WHERE id = ?", (r["slot_id"],)).fetchone()["code"]
-        is_admin = bool(user and user["role"] == "admin")
+        is_admin = bool(user and user["role"] in ("admin", "guard"))
         log(db, "admin" if is_admin else "web", "reservation_cancel", f"Hủy đặt chỗ #{rid} ({r['license_plate']}), trả ô về trống")
         details = f"Ô {code} · {r['license_plate']} · vé {r['ticket_code']} (cọc {r['deposit_amount']:,}đ, không hoàn)"
         if user:
@@ -342,6 +343,7 @@ def shift_reservation(rid: int, minutes: float) -> dict:
 # ---------------------------------------------------------------- Check-in
 def check_in(raw_plate: str, source: str = "web") -> dict:
     plate = normalize_plate(raw_plate)
+    gate_dist = mapcfg.route_length_from_gate(mapcfg.get_config())  # đọc trước khi mở transaction
     with Tx() as db:
         if db.execute("SELECT 1 FROM parking_sessions WHERE license_plate = ? AND status = 'parked'", (plate,)).fetchone():
             fail(f"Xe {plate} đã ở trong bãi")
@@ -365,9 +367,9 @@ def check_in(raw_plate: str, source: str = "web") -> dict:
             reservation_id, user_id = res["id"], res["user_id"]
             waived = res["deposit_mode"] == FREE_MODE
         else:
-            slot = db.execute(
-                "SELECT * FROM slots WHERE status = 'available' ORDER BY floor, code LIMIT 1"
-            ).fetchone()
+            # Xe vãng lai: ô trống gần cổng vào nhất theo lối đi, ưu tiên tầng thấp (Tầng 1 trước)
+            free = db.execute("SELECT * FROM slots WHERE status = 'available' AND active = 1").fetchall()
+            slot = min(free, key=lambda r: (r["floor"], gate_dist.get(r["code"], math.inf), r["code"])) if free else None
             if not slot:
                 log(db, source, "gate_denied", f"Bãi đầy — từ chối xe {plate}")
                 fail("Bãi xe đã hết chỗ trống", 409)
@@ -393,6 +395,7 @@ def check_in(raw_plate: str, source: str = "web") -> dict:
         "session": get_session(sid),
         "entry_type": entry_type,
         "slot_code": slot_code,
+        "floor": floor,
         "directions": directions(slot_code, floor),
         "message": f"Xe {plate} ({kind}) → ô {slot_code}",
     }
@@ -408,7 +411,7 @@ def check_in_by_ticket(raw: str, source: str = "admin") -> dict:
     if not r:
         fail(f"Không tìm thấy vé {code}", 404)
     if r["status"] != "active":
-        msg = {"checked_in": "đã được dùng để vào bãi", "expired": "đã hết hạn", "cancelled": "đã bị hủy",
+        msg = {"checked_in": "đã được dùng để vào bãi", "parked": "đã được dùng để vào bãi", "expired": "đã hết hạn", "cancelled": "đã bị hủy",
                "pending_payment": "chưa nhận được tiền cọc — chờ xác nhận chuyển khoản hoặc kiểm tra app ngân hàng rồi bấm Duyệt cọc"}.get(r["status"], r["status"])
         fail(f"Vé {code} {msg}")
     result = check_in(r["license_plate"], source=source)
@@ -436,9 +439,12 @@ def user_history(user_id: int) -> dict:
 
 
 # ---------------------------------------------------------------- Tính tiền
-def _quote(s: dict, rate: int) -> dict:
+def _quote(s: dict, rate: int, free_minutes: int | None = None) -> dict:
+    """Miễn phí `free_minutes` phút đầu (Cài đặt, mặc định 15); quá thời gian đó tính theo block giờ, làm tròn lên (tối thiểu 1 giờ)."""
+    if free_minutes is None:
+        free_minutes = get_settings()["free_minutes"]
     seconds = (now() - parse_dt(s["check_in_time"])).total_seconds()
-    hours = max(1, math.ceil(seconds / 3600))
+    hours = 0 if seconds <= free_minutes * 60 else max(1, math.ceil(seconds / 3600))
     if s.get("fee_waived"):  # Admin: miễn phí
         return {"parked_seconds": int(max(0, seconds)), "hours_billed": hours, "total_fee": 0, "amount_due": 0, "free": True}
     total = hours * rate
@@ -524,7 +530,7 @@ def pay_tx(db, s, method: str, source: str, q: dict | None = None) -> None:
         (now_iso(), q["hours_billed"], q["total_fee"], q["amount_due"], method, s["id"]),
     )
     db.execute("UPDATE slots SET status = 'available' WHERE id = ?", (s["slot_id"],))
-    label = {"online_qr": "Online QR", "cash": "Tiền mặt", FREE_METHOD: "Miễn phí (Admin)"}.get(method, method)
+    label = PAY_LABELS.get(method, method)
     if source == "sepay":
         label += " · SePay tự xác nhận"
     slot_code = db.execute("SELECT code FROM slots WHERE id = ?", (s["slot_id"],)).fetchone()["code"]
@@ -533,6 +539,10 @@ def pay_tx(db, s, method: str, source: str, q: dict | None = None) -> None:
     if act_uid:
         log_activity(db, act_uid, act_email, "check_out",
                      f"Xe {s['license_plate']} ra khỏi ô {slot_code} · {q['hours_billed']} giờ · trả {q['amount_due']:,}đ ({label})")
+
+
+PAY_LABELS = {"online_qr": "Online QR", "cash": "Tiền mặt", FREE_METHOD: "Miễn phí (Admin)",
+              "deposit": "Đã trừ đủ bằng tiền cọc", "free_period": "Miễn phí thời gian đầu", "demo": "Giả lập SePay (Demo)"}
 
 
 def free_exit(sid: int, source: str) -> dict | None:
@@ -651,6 +661,10 @@ def exit_gate(sid: int, source: str) -> dict:
                 action = "late_fee"
                 log(db, source, "late_exit", f"Xe {s['license_plate']} ra quá hạn (hạn {s['exit_deadline'][11:16]}): "
                                              f"phí phát sinh thêm {q['amount_due']:,}đ — chặn barrier")
+        elif q["amount_due"] == 0:
+            # Phí <= tiền cọc (hoặc trong thời gian miễn phí) -> chốt hoàn tất, mở barrier ngay
+            pay_tx(db, s, "deposit" if (s["deposit_deducted"] or 0) > 0 else "free_period", source, q)
+            action = "auto_open"
         else:
             action = "await_payment"
             log(db, source, "checkout_quote",
@@ -736,8 +750,9 @@ def stats() -> dict:
         "revenue_cash": scalar("SELECT SUM(amount_due) FROM parking_sessions WHERE payment_status='paid' AND payment_method='cash'")
                         + scalar("SELECT SUM(prepaid_amount) FROM parking_sessions WHERE prepay_method='cash'"),
         "count_prepaid": scalar("SELECT COUNT(*) FROM parking_sessions WHERE prepaid_at IS NOT NULL"),
-        "revenue_deposit": scalar("SELECT SUM(deposit_amount) FROM reservations WHERE deposit_paid=1"),
-        "deposit_forfeited": scalar("SELECT SUM(deposit_amount) FROM reservations WHERE deposit_paid=1 AND status IN ('expired','cancelled')"),
+        # Cọc giả lập từ Bảng Demo (deposit_mode = 'demo') không tính vào doanh thu
+        "revenue_deposit": scalar("SELECT SUM(deposit_amount) FROM reservations WHERE deposit_paid=1 AND deposit_mode != 'demo'"),
+        "deposit_forfeited": scalar("SELECT SUM(deposit_amount) FROM reservations WHERE deposit_paid=1 AND deposit_mode != 'demo' AND status IN ('expired','cancelled')"),
         "count_paid_online": scalar("SELECT COUNT(*) FROM parking_sessions WHERE payment_method='online_qr'"),
         "count_paid_cash": scalar("SELECT COUNT(*) FROM parking_sessions WHERE payment_method='cash'"),
         "count_free": scalar(f"SELECT COUNT(*) FROM parking_sessions WHERE payment_method='{FREE_METHOD}'"),
@@ -752,10 +767,10 @@ def stats() -> dict:
 
 
 def public_state() -> dict:
-    slots = query("SELECT id, code, floor, status FROM slots ORDER BY floor, code")
+    slots = query("SELECT id, code, floor, status FROM slots WHERE active = 1 ORDER BY floor, code")
     cfg = get_settings()
     summary = {}
-    for f in (1, 2, 3):
+    for f in sorted({s["floor"] for s in slots}):
         fs = [s for s in slots if s["floor"] == f]
         summary[f] = {
             "total": len(fs),
@@ -763,11 +778,248 @@ def public_state() -> dict:
             "reserved": sum(s["status"] in ("reserved", "pending_payment") for s in fs),
             "occupied": sum(s["status"] == "occupied" for s in fs),
         }
-    pub_keys = ("hold_minutes", "deposit_amount", "hourly_rate", "exit_grace_minutes") + CONTACT_KEYS
+    pub_keys = ("hold_minutes", "deposit_amount", "hourly_rate", "exit_grace_minutes", "free_minutes", "pending_minutes") + CONTACT_KEYS
     return {
         "slots": slots,
         "summary": summary,
-        "settings": {**{k: cfg[k] for k in pub_keys}, "pending_minutes": PENDING_PAYMENT_MINUTES, "auto_gate": cfg["auto_gate"],
+        "floors": sorted(summary),
+        "settings": {**{k: cfg[k] for k in pub_keys}, "auto_gate": cfg["auto_gate"],
                      "sepay_enabled": bool(cfg["sepay_api_key"].strip() or os.environ.get("SEPAY_API_KEY", "").strip())},
         "server_time": now_iso(),
     }
+
+
+# ---------------------------------------------------------------- v3: Xác nhận đã vào ô / Đổi ô 1 chạm
+WRONG_SLOT_WINDOW_MINUTES = 20  # xe vừa qua cổng trong khoảng này mà chưa xác nhận đỗ -> theo dõi đỗ nhầm ô
+
+
+def _can_manage(db, user: dict | None, user_id) -> bool:
+    if user is None:  # gọi nội bộ (cảm biến)
+        return True
+    if user["role"] in ("guard", "admin"):
+        return True
+    return bool(user_id) and user_id == user["id"]
+
+
+def session_for_reservation(rid: int) -> dict:
+    r = query_one("SELECT * FROM reservations WHERE id = ?", (rid,))
+    if not r:
+        fail("Không tìm thấy đặt chỗ", 404)
+    s = query_one("SELECT id FROM parking_sessions WHERE reservation_id = ? AND status = 'parked'", (rid,))
+    return {"reservation": r, "session_id": s["id"] if s else None}
+
+
+def confirm_parked(sid: int, user: dict | None, source: str = "web") -> dict:
+    """Xe đã đỗ đúng ô: lượt gửi `parked_confirmed_at`, đặt chỗ -> `parked` (`parked_at`), ô -> `occupied`."""
+    with Tx() as db:
+        s = db.execute("SELECT * FROM parking_sessions WHERE id = ?", (sid,)).fetchone()
+        if not s or s["status"] != "parked":
+            fail("Xe không ở trạng thái đang đỗ trong bãi", 404)
+        res = db.execute("SELECT * FROM reservations WHERE id = ?", (s["reservation_id"],)).fetchone() if s["reservation_id"] else None
+        owner = s["user_id"] or (res["user_id"] if res else None)
+        if not _can_manage(db, user, owner):
+            fail("Bạn không có quyền xác nhận lượt gửi xe này", 403)
+        stamp = now_iso()
+        slot_code = db.execute("SELECT code FROM slots WHERE id = ?", (s["slot_id"],)).fetchone()["code"]
+        if not s["parked_confirmed_at"]:
+            db.execute("UPDATE parking_sessions SET parked_confirmed_at = ? WHERE id = ?", (stamp, sid))
+            db.execute("UPDATE slots SET status = 'occupied' WHERE id = ?", (s["slot_id"],))
+            if res and res["status"] in ("checked_in", "parked"):
+                db.execute("UPDATE reservations SET status = 'parked', parked_at = ? WHERE id = ?", (stamp, res["id"]))
+            who = {"sensor": "cảm biến IR tự xác nhận", "web": "khách xác nhận"}.get(source, "Bảo vệ/Admin xác nhận")
+            log(db, "esp32" if source == "sensor" else ("web" if source == "web" else "admin"), "slot_confirmed",
+                f"Xe {s['license_plate']} đã đỗ vào ô {slot_code} ({who})")
+            act_uid, act_email = owner_of_plate(db, s["license_plate"], owner)
+            if act_uid:
+                log_activity(db, act_uid, act_email, "slot_confirmed", f"Xe {s['license_plate']} đã đỗ vào ô {slot_code} ({who})")
+    out = get_session(sid)
+    out["reservation_id"] = s["reservation_id"]
+    return out
+
+
+def _slot_free_for_switch(db, slot) -> bool:
+    """Ô nhận xe khi đổi: đang trống, hoặc chỉ bị cảm biến IR báo có xe (chính xe đang đỗ nhầm) mà không có lượt gửi / đặt chỗ nào."""
+    if not slot.get("active", 1):
+        return False
+    if slot["status"] == "available":
+        return True
+    if slot["status"] != "occupied":
+        return False
+    busy = db.execute("SELECT 1 FROM parking_sessions WHERE slot_id = ? AND status = 'parked'", (slot["id"],)).fetchone() \
+        or db.execute(f"SELECT 1 FROM reservations WHERE slot_id = ? AND status IN {HOLD_STATUSES}", (slot["id"],)).fetchone()
+    return not busy
+
+
+def switch_slot(new_code: str, user: dict | None, *, rid: int | None = None, sid: int | None = None,
+                floor: int | None = None, source: str = "web") -> dict:
+    """Đổi ô 1 chạm (atomic): ô mới phải trống -> khóa ô mới cho đơn/lượt gửi, trả ô cũ về trống.
+    - Đơn chưa qua cổng (pending_payment/active): chuyển giữ chỗ sang ô mới.
+    - Xe đã qua cổng (lượt gửi đang đỗ): chuyển lượt gửi + đơn sang ô mới, ô mới `occupied`."""
+    new_code = (new_code or "").strip().upper()
+    with Tx() as db:
+        new = get_slot(db, new_code)
+        if floor is not None and new["floor"] != floor:
+            fail(f"Ô {new_code} không thuộc Tầng {floor}")
+        r = db.execute("SELECT * FROM reservations WHERE id = ?", (rid,)).fetchone() if rid else None
+        if rid and not r:
+            fail("Không tìm thấy đặt chỗ", 404)
+        s = None
+        if sid:
+            s = db.execute("SELECT * FROM parking_sessions WHERE id = ?", (sid,)).fetchone()
+            if not s:
+                fail("Không tìm thấy lượt gửi xe", 404)
+        elif r and r["status"] in ("checked_in", "parked"):
+            s = db.execute("SELECT * FROM parking_sessions WHERE reservation_id = ? AND status = 'parked'", (r["id"],)).fetchone()
+        if s is not None and s["status"] != "parked":
+            fail("Xe không ở trạng thái đang đỗ trong bãi")
+        if s is not None and not r and s["reservation_id"]:
+            r = db.execute("SELECT * FROM reservations WHERE id = ?", (s["reservation_id"],)).fetchone()
+        if s is None and not (r and r["status"] in HOLD_STATUSES):
+            fail("Đặt chỗ này không còn hiệu lực để đổi ô")
+        owner = (s["user_id"] if s else None) or (r["user_id"] if r else None)
+        if not _can_manage(db, user, owner):
+            fail("Bạn không có quyền đổi ô cho xe này", 403)
+        old_id = s["slot_id"] if s else r["slot_id"]
+        if new["id"] == old_id:
+            fail(f"Xe đang ở ô {new_code} rồi")
+        if not _slot_free_for_switch(db, new):
+            fail(f"Ô {new_code} không còn trống — hãy chọn ô khác")
+        old_code = db.execute("SELECT code FROM slots WHERE id = ?", (old_id,)).fetchone()["code"]
+        plate = s["license_plate"] if s else r["license_plate"]
+        if s is not None:
+            db.execute("UPDATE parking_sessions SET slot_id = ?, parked_confirmed_at = NULL WHERE id = ?", (new["id"], s["id"]))
+            db.execute("UPDATE slots SET status = 'occupied' WHERE id = ?", (new["id"],))
+            if r:
+                db.execute("UPDATE reservations SET slot_id = ? WHERE id = ?", (new["id"], r["id"]))
+        else:
+            db.execute("UPDATE reservations SET slot_id = ? WHERE id = ?", (new["id"], r["id"]))
+            db.execute("UPDATE slots SET status = ? WHERE id = ?", (res_slot_status(r), new["id"]))
+        db.execute("UPDATE slots SET status = 'available' WHERE id = ?", (old_id,))
+        log(db, "web" if source == "web" else "admin", "slot_switched", f"Xe {plate} đổi ô {old_code} → {new_code}")
+        act_uid, act_email = owner_of_plate(db, plate, owner)
+        if act_uid:
+            log_activity(db, act_uid, act_email, "slot_switched", f"Xe {plate} đổi ô {old_code} → {new_code}")
+        sid_out, rid_out = (s["id"] if s is not None else None), (r["id"] if r else None)
+    out = {"license_plate": plate, "old_slot_code": old_code, "new_slot_code": new_code, "slot_code": new_code,
+           "floor": new["floor"], "user_id": owner, "reservation_id": rid_out, "session_id": sid_out}
+    if sid_out:
+        out["session"] = get_session(sid_out)
+    if rid_out:
+        out["reservation"] = get_reservation(rid_out)
+    return out
+
+
+def sensor_event(slot_code: str, occupied: bool) -> dict:
+    """Cảm biến IR báo CÓ XE: tự xác nhận khi xe vào đúng ô; phát hiện đỗ nhầm khi xe vừa qua cổng lại vào ô trống khác."""
+    if not occupied:
+        return {"kind": None}
+    slot = query_one("SELECT * FROM slots WHERE code = ?", (slot_code,))
+    if not slot:
+        return {"kind": None}
+    own = query_one("SELECT * FROM parking_sessions WHERE slot_id = ? AND status = 'parked'", (slot["id"],))
+    if own:
+        return {"kind": "confirm", "session_id": own["id"]} if not own["parked_confirmed_at"] else {"kind": None}
+    if query_one(f"SELECT 1 FROM reservations WHERE slot_id = ? AND status IN {HOLD_STATUSES}", (slot["id"],)):
+        return {"kind": None}
+    cutoff = (now() - timedelta(minutes=WRONG_SLOT_WINDOW_MINUTES)).isoformat(timespec="seconds")
+    s = query_one(SESSION_SQL + " WHERE p.status = 'parked' AND p.parked_confirmed_at IS NULL AND p.check_in_time >= ? "
+                                "AND p.slot_id != ? ORDER BY p.check_in_time DESC LIMIT 1", (cutoff, slot["id"]))
+    if not s:
+        return {"kind": None}
+    owner = s["user_id"]
+    if not owner and s["reservation_id"]:
+        r = query_one("SELECT user_id FROM reservations WHERE id = ?", (s["reservation_id"],))
+        owner = r["user_id"] if r else None
+    return {"kind": "wrong", "alert": {
+        "detected_slot_code": slot["code"], "detected_floor": slot["floor"], "assigned_slot_code": s["slot_code"],
+        "assigned_floor": s["floor"], "license_plate": s["license_plate"], "session_id": s["id"],
+        "reservation_id": s["reservation_id"], "user_id": owner}}
+
+
+# ---------------------------------------------------------------- v3: Bảng điều khiển Demo
+def reset_demo(admin: dict) -> dict:
+    """Đưa toàn bộ ô về trống và đóng các phiên đang mở (đơn đang giữ -> hủy, xe đang đỗ -> kết thúc 0đ, `payment_method = reset`).
+    GIỮ lịch sử doanh thu, nhật ký thanh toán, tài khoản."""
+    with Tx() as db:
+        holds = db.execute("SELECT id FROM reservations WHERE status IN ('pending_payment', 'active', 'checked_in')").fetchall()
+        for r in holds:
+            db.execute("UPDATE reservations SET status = 'cancelled' WHERE id = ?", (r["id"],))
+        parked = db.execute("SELECT id FROM parking_sessions WHERE status = 'parked'").fetchall()
+        stamp = now_iso()
+        for s in parked:
+            db.execute("""UPDATE parking_sessions SET status = 'completed', payment_status = 'void', payment_method = 'reset',
+                          check_out_time = ?, hours_billed = 0, total_fee = 0, amount_due = 0 WHERE id = ?""", (stamp, s["id"]))
+        n_slots = db.execute("UPDATE slots SET status = 'available' WHERE active = 1 AND status != 'available'").rowcount
+        msg = (f"Reset bãi xe (Demo): hủy {len(holds)} đơn đang giữ, kết thúc {len(parked)} xe đang đỗ, "
+               f"trả {n_slots} ô về trống — giữ lịch sử doanh thu")
+        log(db, "admin", "reset", msg)
+        log_activity(db, admin["id"], admin["email"], "demo_reset", msg)
+    return {"cancelled_reservations": len(holds), "closed_sessions": len(parked), "freed_slots": n_slots, "message": msg}
+
+
+def demo_sepay(admin: dict, rid: int | None = None, sid: int | None = None) -> dict:
+    """Giả lập SePay báo tiền vào (không tạo giao dịch ngân hàng, không tính doanh thu):
+    ưu tiên đơn chờ cọc cũ nhất -> xe đang chờ trả phí tại cổng ra -> xe vừa bấm thanh toán trước."""
+    with Tx() as db:
+        r = None
+        if rid:
+            r = db.execute("SELECT * FROM reservations WHERE id = ?", (rid,)).fetchone()
+            if not r:
+                fail("Không tìm thấy đặt chỗ", 404)
+        elif not sid:
+            r = db.execute("SELECT * FROM reservations WHERE status = 'pending_payment' ORDER BY created_at LIMIT 1").fetchone()
+        if r:
+            if r["status"] != "pending_payment":
+                fail(f"Vé {r['ticket_code']} không ở trạng thái chờ chuyển khoản")
+            db.execute("UPDATE reservations SET deposit_mode = 'demo' WHERE id = ?", (r["id"],))
+            activate_reservation_tx(db, r, via="demo", admin=admin)
+            kind, ref = "deposit", r["id"]
+        else:
+            s = db.execute("SELECT * FROM parking_sessions WHERE id = ?", (sid,)).fetchone() if sid else (
+                db.execute("""SELECT * FROM parking_sessions WHERE status = 'parked' AND payment_status = 'pending'
+                              AND check_out_time IS NOT NULL ORDER BY check_out_time DESC LIMIT 1""").fetchone()
+                or db.execute("""SELECT * FROM parking_sessions WHERE status = 'parked' AND prepay_due IS NOT NULL
+                                 ORDER BY prepay_requested_at DESC LIMIT 1""").fetchone())
+            if not s or s["status"] != "parked":
+                fail("Không có đơn chờ cọc hoặc xe nào đang chờ thanh toán để giả lập SePay")
+            s = _refresh_waiver(db, s)
+            q = _quote(dict(s), get_settings()["hourly_rate"])
+            if s["check_out_time"] and s["payment_status"] == "pending":
+                pay_tx(db, s, "demo", "simulator", q)
+                kind = "exit_paid"
+            else:
+                mark_prepaid_tx(db, s, "demo", q, q["amount_due"], "simulator")
+                kind = "prepaid"
+            ref = s["id"]
+        log_activity(db, admin["id"], admin["email"], "demo_sepay", f"Giả lập SePay: {kind} #{ref}")
+    if kind == "deposit":
+        return {"kind": kind, "reservation": get_reservation(ref)}
+    return {"kind": kind, "session": get_session(ref)}
+
+
+# ---------------------------------------------------------------- v3: Báo cáo CSV
+REPORT_HEADER = ["Mã lượt", "Biển số", "Ô đỗ", "Tầng", "Loại xe", "Mã vé", "Giờ vào", "Giờ ra", "Thời gian đỗ (phút)",
+                 "Số giờ tính phí", "Tổng phí (đ)", "Tiền cọc SePay đã trừ (đ)", "Đã trả trước (đ)", "Phí thu thêm tại cổng (đ)",
+                 "Hình thức", "Trạng thái", "Doanh thu ghi nhận (đ)"]
+
+
+def report_rows() -> list[list]:
+    rows = query("""SELECT p.*, s.code AS slot_code, s.floor, r.ticket_code, r.deposit_mode FROM parking_sessions p
+                    JOIN slots s ON s.id = p.slot_id LEFT JOIN reservations r ON r.id = p.reservation_id ORDER BY p.id""")
+    out = []
+    for p in rows:
+        minutes = ""
+        if p["check_out_time"]:
+            minutes = int((parse_dt(p["check_out_time"]) - parse_dt(p["check_in_time"])).total_seconds() // 60)
+        counted = p["payment_status"] == "paid" and p["payment_method"] in ("online_qr", "cash")
+        prepaid_counted = (p["prepaid_amount"] or 0) if p["prepay_method"] in ("online_qr", "cash") else 0
+        deposit = 0 if p.get("deposit_mode") == "demo" else (p["deposit_deducted"] or 0)
+        at_gate = (p["amount_due"] or 0) if counted else 0
+        out.append([p["id"], p["license_plate"], p["slot_code"], p["floor"], "Đặt trước" if p["entry_type"] == "reservation" else "Vãng lai",
+                    p.get("ticket_code") or "", p["check_in_time"], p["check_out_time"] or "", minutes,
+                    p["hours_billed"] if p["hours_billed"] is not None else "", p["total_fee"] or 0, p["deposit_deducted"] or 0,
+                    p["prepaid_amount"] or 0, at_gate,
+                    PAY_LABELS.get(p["payment_method"] or "", p["payment_method"] or ""),
+                    {"parked": "Đang đỗ", "completed": "Đã ra"}.get(p["status"], p["status"]),
+                    at_gate + prepaid_counted + deposit])
+    return out

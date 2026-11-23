@@ -1,4 +1,6 @@
-"""API Bảo vệ / Admin — chỉ tài khoản role `admin` (header Authorization: Bearer <token>)."""
+"""API Bảo vệ / Admin (header Authorization: Bearer <token>).
+- Bảo vệ (`guard`) + Admin: vận hành cổng, barrier khẩn cấp, check-in/out, thu tiền mặt / duyệt cọc dự phòng.
+- Chỉ Admin: Cài đặt, tài khoản, nhật ký, giả lập trôi thời gian, reset (Bảo vệ không sửa bản đồ / xóa dữ liệu)."""
 import os
 import re
 
@@ -6,13 +8,14 @@ from fastapi import APIRouter, Depends
 
 import auth
 import services as svc
-from database import Tx, get_settings, log_activity, now_iso, query, query_one, reset_all
+from database import Tx, get_settings, log_activity, now_iso, query, query_one
 from models import (AdminUserCreate, BarrierCommand, GateEvent, PrepayConfirm, RoleUpdate, SessionAction, SettingsUpdate,
                     SimulateExit, SimulateHours, SimulateReservation, TicketInput)
 from realtime import barriers, manager
 from routers.hardware import exit_flow, handle_gate
 
-router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(auth.require_admin)])
+router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(auth.require_staff)])
+ADMIN = [Depends(auth.require_admin)]
 
 
 @router.get("/dashboard")
@@ -27,7 +30,7 @@ def dashboard():
     }
 
 
-@router.get("/settings")
+@router.get("/settings", dependencies=ADMIN)
 def read_settings():
     # Cho biết có SEPAY_API_KEY trong biến môi trường (Render) hay không — không trả về giá trị
     return {**get_settings(), "sepay_env_configured": bool(os.environ.get("SEPAY_API_KEY", "").strip())}
@@ -37,6 +40,7 @@ LEGACY_ACTIONS = ("reservation_soft", "reservation_bumped", "reservation_upgrade
 
 SETTING_LABELS = {
     "hold_minutes": "Giữ chỗ có cọc (phút)", "deposit_amount": "Tiền cọc", "hourly_rate": "Đơn giá/giờ",
+    "free_minutes": "Miễn phí thời gian đầu (phút)", "pending_minutes": "Chờ chuyển khoản cọc (phút)",
     "sepay_api_key": "SePay API Key", "exit_grace_minutes": "Thời gian ra cổng sau thanh toán (phút)",
     "auto_gate": "Tự động mở barrier (Auto-Gate)",
     "parking_name": "Tên bãi", "admin_name": "Tên quản trị viên", "admin_phone": "SĐT hỗ trợ",
@@ -71,7 +75,7 @@ async def update_settings(body: SettingsUpdate, admin: dict = Depends(auth.requi
 
 
 @router.post("/reservations/{rid}/approve")
-async def approve_deposit(rid: int, admin: dict = Depends(auth.require_admin)):
+async def approve_deposit(rid: int, admin: dict = Depends(auth.require_staff)):
     """Duyệt cọc thủ công (dự phòng khi webhook SePay chưa về) sau khi kiểm tra app ngân hàng."""
     r = svc.approve_deposit(rid, admin)
     r["via"] = "manual"
@@ -79,7 +83,7 @@ async def approve_deposit(rid: int, admin: dict = Depends(auth.require_admin)):
     return r
 
 
-@router.get("/activity")
+@router.get("/activity", dependencies=ADMIN)
 def activity(q: str = "", action: str = "", limit: int = 200):
     """Toàn bộ lịch sử đăng nhập & hoạt động; lọc theo email/nội dung (`q`) và loại hành động (`action`)."""
     sql = "SELECT * FROM activity_logs WHERE 1=1"
@@ -136,14 +140,14 @@ async def checkout(body: SessionAction):
 
 
 @router.post("/prepay-confirm")
-async def prepay_confirm(body: PrepayConfirm, admin: dict = Depends(auth.require_admin)):
+async def prepay_confirm(body: PrepayConfirm, admin: dict = Depends(auth.require_staff)):
     """Bảo vệ xác nhận thu hộ phí trước khi xe ra cổng -> 'Sẵn sàng ra cổng'."""
     s = svc.confirm_prepay(body.session_id, body.method, admin)
     await manager.broadcast("prepaid", s)
     return s
 
 
-@router.post("/simulate/exit-time")
+@router.post("/simulate/exit-time", dependencies=ADMIN)
 async def exit_time(body: SimulateExit):
     s = svc.shift_exit_deadline(body.session_id, body.minutes)
     await manager.broadcast("simulate", s)
@@ -166,14 +170,14 @@ async def pay_online(body: SessionAction):
     return s
 
 
-@router.post("/simulate/add-hours")
+@router.post("/simulate/add-hours", dependencies=ADMIN)
 async def add_hours(body: SimulateHours):
     s = svc.shift_session(body.session_id, body.hours)
     await manager.broadcast("simulate", s)
     return s
 
 
-@router.post("/simulate/reservation-time")
+@router.post("/simulate/reservation-time", dependencies=ADMIN)
 async def reservation_time(body: SimulateReservation):
     r = svc.shift_reservation(body.reservation_id, body.minutes)
     expired = svc.expire_reservations()
@@ -182,40 +186,45 @@ async def reservation_time(body: SimulateReservation):
 
 
 @router.post("/reservations/{rid}/cancel")
-async def cancel_reservation(rid: int, admin: dict = Depends(auth.require_admin)):
+async def cancel_reservation(rid: int, admin: dict = Depends(auth.require_staff)):
     r = svc.cancel_reservation(rid, admin)
     await manager.broadcast("reservation_cancelled", r)
     return r
 
 
-@router.post("/reset")
-async def reset():
-    reset_all()
+@router.post("/reset", dependencies=ADMIN)
+async def reset(admin: dict = Depends(auth.require_admin)):
+    """Reset an toàn: trả ô về trống, đóng phiên đang mở — GIỮ lịch sử doanh thu (giống nút Reset trong Bảng Demo)."""
+    from devices import hub
+    r = svc.reset_demo(admin)
+    hub.clear()
     await barriers.close("entry", "Reset")
     await barriers.close("exit", "Reset")
-    svc.add_log("admin", "reset", "Đã reset toàn bộ dữ liệu demo")
-    await manager.broadcast("reset")
-    return {"ok": True}
+    await manager.broadcast("reset", r)
+    return {"ok": True, **r}
 
 
 # ---------------------------------------------------------------- Quản lý tài khoản
-@router.get("/users")
+@router.get("/users", dependencies=ADMIN)
 def list_users():
     return query("SELECT id, email, full_name, phone, role, created_at FROM users ORDER BY role, id")
 
 
-@router.post("/users")
+@router.post("/users", dependencies=ADMIN)
 def create_admin(body: AdminUserCreate, admin: dict = Depends(auth.require_admin)):
-    """Tạo tài khoản admin mới; nếu email đã có thì nâng quyền tài khoản đó lên admin."""
+    """Tạo tài khoản Admin / Bảo vệ mới; nếu email đã có thì đổi quyền tài khoản đó."""
     email = auth.normalize_email(body.email)
     existing = query_one("SELECT * FROM users WHERE email = ?", (email,))
+    role, role_vi = body.role, ("Admin" if body.role == "admin" else "Bảo vệ")
     with Tx() as db:
         if existing:
-            if existing["role"] == "admin":
-                svc.fail(f"{email} đã là Admin")
-            db.execute("UPDATE users SET role = 'admin' WHERE id = ?", (existing["id"],))
-            svc.log(db, "admin", "user_promote", f"{admin['email']} nâng quyền {email} lên Admin")
-            log_activity(db, admin["id"], admin["email"], "user_role", f"Nâng quyền {email} lên Admin")
+            if existing["role"] == role:
+                svc.fail(f"{email} đã là {role_vi}")
+            if existing["email"] == auth.DEFAULT_ADMIN_EMAIL:
+                svc.fail("Không thể đổi quyền tài khoản Admin gốc")
+            db.execute("UPDATE users SET role = ? WHERE id = ?", (role, existing["id"]))
+            svc.log(db, "admin", "user_promote", f"{admin['email']} đổi quyền {email} thành {role_vi}")
+            log_activity(db, admin["id"], admin["email"], "user_role", f"Đổi quyền {email} thành {role_vi}")
             action = "promoted"
         else:
             if not body.password or not body.full_name:
@@ -223,17 +232,17 @@ def create_admin(body: AdminUserCreate, admin: dict = Depends(auth.require_admin
             auth.validate_password(body.password)
             phone = re.sub(r"[^\d+]", "", body.phone or "")
             db.execute(
-                "INSERT INTO users (email, password_hash, full_name, phone, role, created_at) VALUES (?, ?, ?, ?, 'admin', ?)",
-                (email, auth.hash_password(body.password), body.full_name.strip(), phone, now_iso()),
+                "INSERT INTO users (email, password_hash, full_name, phone, role, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (email, auth.hash_password(body.password), body.full_name.strip(), phone, role, now_iso()),
             )
-            svc.log(db, "admin", "user_create", f"{admin['email']} tạo tài khoản Admin {email}")
-            log_activity(db, admin["id"], admin["email"], "user_create", f"Tạo tài khoản Admin {email}")
+            svc.log(db, "admin", "user_create", f"{admin['email']} tạo tài khoản {role_vi} {email}")
+            log_activity(db, admin["id"], admin["email"], "user_create", f"Tạo tài khoản {role_vi} {email}")
             action = "created"
     user = query_one("SELECT * FROM users WHERE email = ?", (email,))
     return {"action": action, "user": auth.public_user(user)}
 
 
-@router.delete("/users/{uid}")
+@router.delete("/users/{uid}", dependencies=ADMIN)
 async def delete_user(uid: int, admin: dict = Depends(auth.require_admin)):
     """Xóa tài khoản. Hủy các đặt chỗ đang giữ ô & trả ô về trống; giữ lịch sử doanh thu (user_id -> NULL)."""
     if uid == admin["id"]:
@@ -259,7 +268,7 @@ async def delete_user(uid: int, admin: dict = Depends(auth.require_admin)):
         n_ses = db.execute("UPDATE parking_sessions SET user_id = NULL WHERE user_id = ?", (uid,)).rowcount
         db.execute("UPDATE activity_logs SET user_id = NULL WHERE user_id = ?", (uid,))  # giữ email trong log
         db.execute("DELETE FROM users WHERE id = ?", (uid,))
-        role = "Admin" if user["role"] == "admin" else "Khách hàng"
+        role = {"admin": "Admin", "guard": "Bảo vệ"}.get(user["role"], "Khách hàng")
         details = (f"Xóa tài khoản {role} {user['email']} ({user['full_name']})"
                    + (f"; hủy {len(freed)} đặt chỗ, trả ô {', '.join(freed)}" if freed else "")
                    + f"; giữ {n_res} đặt chỗ & {n_ses} lượt gửi xe trong lịch sử")
@@ -269,7 +278,7 @@ async def delete_user(uid: int, admin: dict = Depends(auth.require_admin)):
     return {"ok": True, "email": user["email"], "freed_slots": freed, "kept_reservations": n_res, "kept_sessions": n_ses}
 
 
-@router.put("/users/{uid}/role")
+@router.put("/users/{uid}/role", dependencies=ADMIN)
 def set_role(uid: int, body: RoleUpdate, admin: dict = Depends(auth.require_admin)):
     if uid == admin["id"] and body.role != "admin":
         svc.fail("Không thể tự hạ quyền chính mình")

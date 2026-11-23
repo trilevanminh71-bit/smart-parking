@@ -14,6 +14,10 @@ from database import Tx, now_iso, query_one
 
 DEFAULT_ADMIN_EMAIL = "trilevanminh71@gmail.com"
 DEFAULT_ADMIN_PASSWORD = "Admin@123"
+DEFAULT_GUARD_EMAIL = "guard@smartparking.vn"
+DEFAULT_GUARD_PASSWORD = "guard123"  # chỉ dùng khi chưa đặt biến môi trường GUARD_PASSWORD
+ROLES = ("customer", "guard", "admin")
+STAFF_ROLES = ("guard", "admin")
 TOKEN_TTL_SECONDS = 30 * 24 * 3600  # 30 ngày
 PBKDF2_ROUNDS = 200_000
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -125,15 +129,37 @@ def require_admin(authorization: str = Header(default="")) -> dict:
     return user
 
 
+def require_staff(authorization: str = Header(default="")) -> dict:
+    """Bảo vệ trực cổng hoặc Admin."""
+    user = current_user(authorization)
+    if user["role"] not in STAFF_ROLES:
+        raise HTTPException(403, "Chỉ tài khoản Bảo vệ hoặc Admin mới được truy cập")
+    return user
+
+
+def is_staff(user: dict | None) -> bool:
+    return bool(user and user.get("role") in STAFF_ROLES)
+
+
 # ---------------------------------------------------------------- Seed
-def seed_admin() -> None:
-    _get_secret()
-    if query_one("SELECT 1 FROM users WHERE email = ?", (DEFAULT_ADMIN_EMAIL,)):
+def _seed_user(email: str, env_name: str, default_password: str, full_name: str, role: str) -> None:
+    if query_one("SELECT 1 FROM users WHERE email = ?", (email,)):
         return
-    # Trên Cloud nên đặt biến môi trường ADMIN_PASSWORD (chỉ dùng khi tạo Admin lần đầu) thay cho mật khẩu mặc định
-    password = os.environ.get("ADMIN_PASSWORD", "").strip() or DEFAULT_ADMIN_PASSWORD
+    # Trên Cloud nên đặt biến môi trường (chỉ dùng khi tạo tài khoản lần đầu) thay cho mật khẩu mặc định
+    password = os.environ.get(env_name, "").strip()
+    if not password:
+        password = default_password
+        print(f"[CẢNH BÁO] Tạo tài khoản {email} với mật khẩu mặc định — hãy đặt biến môi trường {env_name} "
+              "hoặc đổi mật khẩu ngay sau khi đăng nhập.", flush=True)
     with Tx() as db:
         db.execute(
-            "INSERT INTO users (email, password_hash, full_name, phone, role, created_at) VALUES (?, ?, ?, ?, 'admin', ?)",
-            (DEFAULT_ADMIN_EMAIL, hash_password(password), "Quản trị viên", "", now_iso()),
+            "INSERT INTO users (email, password_hash, full_name, phone, role, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (email, hash_password(password), full_name, "", role, now_iso()),
         )
+
+
+def seed_admin() -> None:
+    """Tài khoản Admin gốc + Bảo vệ trực cổng mặc định (nếu chưa có)."""
+    _get_secret()
+    _seed_user(DEFAULT_ADMIN_EMAIL, "ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD, "Quản trị viên", "admin")
+    _seed_user(DEFAULT_GUARD_EMAIL, "GUARD_PASSWORD", DEFAULT_GUARD_PASSWORD, "Bảo vệ trực cổng", "guard")

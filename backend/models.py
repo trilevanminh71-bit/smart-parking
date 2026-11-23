@@ -75,6 +75,8 @@ class SettingsUpdate(BaseModel):
     deposit_amount: Optional[int] = Field(default=None, ge=0, le=10_000_000)
     hourly_rate: Optional[int] = Field(default=None, ge=0, le=10_000_000)
     exit_grace_minutes: Optional[int] = Field(default=None, ge=1, le=240)
+    free_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
+    pending_minutes: Optional[int] = Field(default=None, ge=1, le=120)
     auto_gate: Optional[bool] = None
     sepay_api_key: Optional[str] = Field(default=None, max_length=200)
     parking_name: Optional[str] = Field(default=None, max_length=80)
@@ -107,8 +109,9 @@ class ChangePasswordInput(BaseModel):
 
 
 class AdminUserCreate(BaseModel):
-    """Tạo admin mới; nếu email đã tồn tại thì nâng quyền tài khoản đó lên admin."""
+    """Tạo tài khoản Admin / Bảo vệ mới; nếu email đã tồn tại thì đổi quyền tài khoản đó."""
     email: str = Field(max_length=120)
+    role: Literal["guard", "admin"] = "admin"
     full_name: Optional[str] = Field(default=None, max_length=80)
     phone: Optional[str] = Field(default=None, max_length=15)
     password: Optional[str] = Field(default=None, max_length=128)
@@ -128,4 +131,52 @@ class ResolveInput(BaseModel):
 
 
 class RoleUpdate(BaseModel):
-    role: Literal["customer", "admin"]
+    role: Literal["customer", "guard", "admin"]
+
+
+# ---------------------------------------------------------------- v3: bản đồ, phần cứng, GPS
+class SwitchSlotInput(BaseModel):
+    new_slot_code: str = Field(min_length=4, max_length=12)
+    floor: Optional[int] = Field(default=None, ge=1, le=9)
+
+
+class Esp32Sync(BaseModel):
+    device_id: str = Field(default="ESP32_MAIN", max_length=40)
+    sensors: dict[str, bool] = Field(default_factory=dict)
+    uptime_sec: int = Field(default=0, ge=0)
+
+
+class AlprScan(BaseModel):
+    license_plate: str = Field(min_length=4, max_length=20)
+    gate: Literal["IN", "OUT", "in", "out", "entry", "exit"] = "IN"
+    confidence: float = Field(default=0.0, ge=0, le=100)
+    plate_image_base64: Optional[str] = Field(default=None, max_length=700_000)
+    camera_id: str = Field(default="CAM_GATE", max_length=40)
+
+
+class AlprHeartbeat(BaseModel):
+    camera_id: str = Field(default="CAM_GATE", max_length=40)
+    fps: Optional[float] = Field(default=None, ge=0, le=240)
+    gate: Optional[str] = Field(default=None, max_length=8)
+
+
+class LocationInput(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    accuracy: Optional[float] = Field(default=None, ge=0, le=100_000)
+    speed: Optional[float] = Field(default=None, ge=0, le=200)
+    heading: Optional[float] = Field(default=None, ge=0, le=360)
+
+
+class DemoAlpr(BaseModel):
+    plate: str = Field(min_length=4, max_length=20)
+    gate: Literal["IN", "OUT"] = "IN"
+
+
+class DemoSepay(BaseModel):
+    reservation_id: Optional[int] = None
+    session_id: Optional[int] = None
+
+
+class ConfirmText(BaseModel):
+    confirm: str = Field(max_length=20)

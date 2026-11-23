@@ -3,7 +3,9 @@
 Chạy: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 import asyncio
+import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,19 +14,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+import auth
+import mapcfg
 import services as svc
-from database import db_kind, init_db
+from database import db_kind, init_db, now_iso, query_one
 from realtime import barriers, manager
-from auth import seed_admin
-from routers import admin, hardware, parking, payment, reservations
+from routers import admin, hardware, parking, payment, reservations, v3
 from routers import auth as auth_router
 
 log = logging.getLogger("smart-parking")
-EXPIRE_INTERVAL_SECONDS = 10
+SCHEDULER_INTERVAL_SECONDS = 10  # quét đơn quá hạn (chờ CK quá `pending_minutes`, giữ chỗ quá `hold_minutes`)
 
 
-async def expire_loop():
-    """Mỗi 10 giây: hủy các đặt chỗ quá giờ và broadcast cập nhật."""
+async def scheduler_loop():
+    """Mỗi 10 giây: hủy đơn `pending_payment` quá hạn chờ SePay, giải phóng ô của đơn đã cọc quá giờ giữ chỗ."""
     while True:
         try:
             expired = svc.expire_reservations()
@@ -33,13 +36,14 @@ async def expire_loop():
                 await manager.broadcast("reservation_expired", {"slots": expired})
         except Exception:
             log.exception("Lỗi khi quét đặt chỗ hết hạn")
-        await asyncio.sleep(EXPIRE_INTERVAL_SECONDS)
+        await asyncio.sleep(SCHEDULER_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    seed_admin()
+    auth.seed_admin()
+    mapcfg.get_config()  # tạo sơ đồ mặc định (30 ô, neo GPS) nếu chưa có
     freed = svc.cleanup_legacy_soft_holds()  # đã bỏ đặt chỗ không cọc: trả ô soft_reserved về trống
     if freed:
         log.info("Đã trả ô giữ tạm (không cọc) về trống: %s", freed)
@@ -47,25 +51,36 @@ async def lifespan(app: FastAPI):
     keys = pay.valid_api_keys()
     print("[SePay] API Key: " + (", ".join(f"{len(k)} ký tự #{pay.key_fingerprint(k)}" for k in keys) if keys
                                   else "CHƯA cấu hình — webhook sẽ trả 401"), flush=True)
-    task =asyncio.create_task(expire_loop())
+    hw = hardware.hardware_keys()
+    print("[Thiết bị] X-API-Key: " + (", ".join(f"#{pay.key_fingerprint(k)}" for k in hw) if hw
+                                       else "CHƯA cấu hình — ESP32/ALPR mới sẽ nhận 503"), flush=True)
+    task = asyncio.create_task(scheduler_loop())
     yield
     task.cancel()
 
 
-app = FastAPI(title="Bãi đỗ xe thông minh 3 tầng", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Bãi đỗ xe thông minh 3 tầng", version="3.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 # Nén gzip phản hồi API & file tĩnh (JS/CSS/HTML) >= 500 byte — tải trang nhanh hơn trên 4G
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 for r in (auth_router.router, parking.router, reservations.router, hardware.router, admin.router,
-          payment.router, payment.admin_router, payment.alias_router):
+          payment.router, payment.admin_router, payment.alias_router, v3.router):
     app.include_router(r)
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"], include_in_schema=False)
 def health():
-    """Rất nhẹ (không đụng CSDL) để UptimeRobot ping giữ server Render free không ngủ."""
-    return {"status": "ok"}
+    """UptimeRobot ping chống ngủ đông Render: kiểm tra luôn kết nối CSDL (Neon PostgreSQL)."""
+    t0 = time.perf_counter()
+    try:
+        query_one("SELECT 1 AS ok")
+        return {"status": "ok", "database": "connected", "engine": db_kind(),
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 1), "timestamp": now_iso()}
+    except Exception as e:
+        log.exception("Healthcheck: lỗi kết nối CSDL")
+        return JSONResponse({"status": "degraded", "database": "error", "error": type(e).__name__, "timestamp": now_iso()},
+                            status_code=503)
 
 
 @app.get("/api/health/details")
@@ -75,6 +90,7 @@ def health_details():
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    """Gửi `ping` để giữ kết nối; gửi `{"type":"auth","token":"..."}` để nhận thêm sự kiện riêng tư (vị trí, ảnh ALPR)."""
     await manager.connect(ws)
     try:
         await ws.send_json({"event": "hello", "data": {"barriers": barriers.snapshot()}})
@@ -82,6 +98,15 @@ async def ws_endpoint(ws: WebSocket):
             msg = await ws.receive_text()
             if msg == "ping":
                 await ws.send_text('{"event":"pong"}')
+                continue
+            try:
+                data = json.loads(msg)
+            except ValueError:
+                continue
+            if isinstance(data, dict) and data.get("type") == "auth":
+                user = auth.decode_token(str(data.get("token") or ""))
+                manager.identify(ws, user)
+                await ws.send_json({"event": "auth", "data": {"ok": bool(user), "role": user["role"] if user else None}})
     except WebSocketDisconnect:
         pass
     finally:

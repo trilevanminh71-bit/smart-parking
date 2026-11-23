@@ -57,7 +57,7 @@ export function expireAccount(email) {
   writeAccounts(loadAccounts().map((a) => (a.email === email ? { ...a, token: '' } : a)))
 }
 
-const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' } }
+export const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' } }
 
 /** Gọi API backend. Ném Error với thông báo tiếng Việt từ backend nếu lỗi. */
 export async function api(path, { method = 'GET', body, form } = {}) {
@@ -103,6 +103,9 @@ export function useRealtime(onEvent) {
       ws = new WebSocket(`${proto}://${location.host}/ws`)
       ws.onopen = () => {
         setConnected(true)
+        // Xác thực kết nối để nhận cả sự kiện riêng tư (vị trí GPS, ảnh biển số cho Bảo vệ)
+        const token = getToken()
+        if (token) ws.send(JSON.stringify({ type: 'auth', token }))
         ping = setInterval(() => ws.readyState === 1 && ws.send('ping'), 20000)
       }
       ws.onmessage = (e) => {
@@ -260,7 +263,8 @@ export const STATUS = {
 export const RES_STATUS = {
   active: { label: 'Đang giữ chỗ', cls: 'bg-amber-500/20 text-amber-300' },
   pending_payment: { label: 'Chờ chuyển khoản', cls: 'bg-orange-500/20 text-orange-300' },
-  checked_in: { label: 'Đã vào bãi', cls: 'bg-emerald-500/20 text-emerald-300' },
+  checked_in: { label: 'Đã qua cổng', cls: 'bg-emerald-500/20 text-emerald-300' },
+  parked: { label: 'Đã đỗ vào ô', cls: 'bg-emerald-500/20 text-emerald-300' },
   expired: { label: 'Hết hạn', cls: 'bg-rose-500/20 text-rose-300' },
   cancelled: { label: 'Đã hủy', cls: 'bg-slate-700 text-slate-300' },
 }
@@ -271,6 +275,9 @@ export const PAY_METHOD = {
   online_qr: { label: 'Online QR', cls: 'bg-violet-500/20 text-violet-300' },
   admin_free: { label: 'Miễn phí (Admin)', cls: 'bg-emerald-500/20 text-emerald-300' },
   deposit: { label: 'Đã trừ đủ bằng cọc', cls: 'bg-slate-700 text-slate-200' },
+  free_period: { label: 'Miễn phí thời gian đầu', cls: 'bg-emerald-500/20 text-emerald-300' },
+  demo: { label: 'Giả lập SePay (Demo)', cls: 'bg-sky-500/20 text-sky-300' },
+  reset: { label: 'Đã reset (Demo)', cls: 'bg-slate-700 text-slate-300' },
 }
 export const payMethod = (m) => PAY_METHOD[m] || { label: m || '—', cls: 'bg-slate-700 text-slate-300' }
 export const isFreeRes = (r) => r?.deposit_mode === 'admin_free'

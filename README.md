@@ -123,21 +123,80 @@ Hoặc trên Windows: chạy file `run-frontend.bat`.
 **Nghiệp vụ**
 - Đặt chỗ quá hạn tự hủy (background task quét mỗi 10 giây), ô trả về trống, cập nhật realtime qua WebSocket.
 - Xe đặt trước vào cổng: khớp ô đã đặt, trừ cọc. Xe vãng lai: tự chọn ô trống tầng thấp nhất.
-- Tính phí: `giờ = max(1, ceil(phút đỗ / 60))`, `tổng = giờ × đơn giá`, `phải trả = max(0, tổng − cọc)`.
+- Tính phí (v3): đỗ ≤ `free_minutes` (mặc định 15 phút) → 0đ; quá thời gian đó `giờ = max(1, ceil(phút đỗ / 60))`,
+  `tổng = giờ × đơn giá`, `phải trả = max(0, tổng − cọc − đã trả trước)`. Phải trả = 0 → camera cổng ra tự chốt & mở barrier;
+  còn phí → VietQR nội dung `PHI <BIỂN_SỐ>`, SePay báo tiền vào đủ thì barrier tự mở.
 - Biển số được chuẩn hóa: `65a12345` → `65A-123.45`, `51g1234` → `51G-1234`, `59x112345` → `59X1-123.45`.
 
 ## 4b. Đưa lên Cloud miễn phí (Render + PostgreSQL)
 - Có biến môi trường `DATABASE_URL` (postgres://…) → backend tự dùng **PostgreSQL**, tự tạo bảng, 30 ô và Admin mặc định.
   Không có → dùng **SQLite** `backend/parking.db` như cũ (Local không cần cài PostgreSQL).
 - Ảnh biên lai được trình duyệt **nén < 300KB (WebP/JPEG)** rồi lưu thẳng vào cột `payment_receipts.receipt_data` → không mất khi server Cloud khởi động lại.
-- `GET /api/health` → `{"status":"ok"}` (nhẹ, hỗ trợ cả HEAD) để **UptimeRobot** ping 5–10 phút/lần giữ server free không ngủ. Chi tiết: `/api/health/details`.
+- `GET /api/health` → `{"status":"ok","database":"connected","timestamp":...}` (có kiểm tra kết nối CSDL, hỗ trợ cả HEAD; CSDL lỗi → 503)
+  để **UptimeRobot** ping 5–10 phút/lần giữ server free không ngủ. Chi tiết: `/api/health/details`.
 - 1 link duy nhất: FastAPI phục vụ `frontend/dist` tại `/`, giữ `/api/*` và `/ws`.
 - Triển khai: đẩy code lên GitHub → Render → **New + → Blueprint** → chọn repo (dùng `render.yaml` ở thư mục gốc).
   Render hỏi `ADMIN_PASSWORD` = mật khẩu cho Admin gốc ở lần khởi tạo đầu (không dùng `Admin@123` trên Internet).
   Sau đó cập nhật link Webhook SePay thành `https://<tên>.onrender.com/api/payment/webhook`.
 - Lưu ý gói free: PostgreSQL free của Render hết hạn sau một thời gian (xem trang Render) — nhớ sao lưu/nâng cấp; server free ngủ sau ~15 phút không có truy cập (UptimeRobot giúp giữ thức).
 
-## 5. API cho ESP32
+## 4c. Phiên bản v3 — 3 vai trò, Bản đồ Kép, Dẫn đường GPS, IoT
+**Biến môi trường mới (Render → Environment):**
+| Biến | Ý nghĩa |
+|---|---|
+| `HARDWARE_API_KEY` | (Tuỳ chọn) Khóa header `X-API-Key` cho ESP32 / Webcam ALPR. Bỏ trống → dùng chung `SEPAY_API_KEY` |
+| `GUARD_PASSWORD` | Mật khẩu tài khoản Bảo vệ mặc định `guard@smartparking.vn` khi tạo lần đầu (bỏ trống → `guard123`, Logs in cảnh báo — đổi ngay) |
+
+**Vai trò (`users.role`):**
+- `customer` — đặt ô, VietQR/SePay, vé QR, chia sẻ GPS, dẫn đường 2 chặng có giọng nói, xác nhận đã vào ô / đổi ô 1 chạm.
+- `guard` — ALPR Live Feed, trạng thái cổng, mở/đóng barrier khẩn cấp, thu tiền mặt / duyệt cọc dự phòng, Sức khỏe thiết bị, vị trí GPS khách. Không sửa bản đồ, không xóa dữ liệu.
+- `admin` — toàn quyền + Trình chỉnh sửa Bản đồ & GPS, Xuất báo cáo CSV, Bảng điều khiển Demo 4 nút, Cài đặt, Tài khoản.
+
+**Cài đặt mới (Admin → Cài đặt):** `free_minutes` (miễn phí N phút đầu, mặc định 15), `pending_minutes` (đơn chờ chuyển khoản tự hủy sau N phút, mặc định 10).
+Giá/giờ, tiền cọc, thời gian giữ chỗ giữ nguyên giá trị đang lưu. Scheduler chạy mỗi 10 giây: hủy đơn chờ CK quá hạn, nhả ô đã cọc quá giờ giữ chỗ.
+
+**Bản đồ (`parking_maps`)** — `GET /api/map/config` (công khai), `PUT /api/map/config` (Admin, broadcast `map_updated`), `POST /api/map/reset-default`.
+JSON gồm `origin_lat/origin_lng` (mặc định 10.0299, 105.7706), `rotation_deg`, `scale_meters_per_unit`, `gate_in/gate_out`,
+`slots[]` (`slot_code, floor, x, y, w, h, rotation, lat, lng, gps_radius_m, hardware_sensor_id` = `NONE`/`IR_1`..`IR_5`),
+`waypoints[]`, `edges[]` (`oneway`), `obstacles[]` (`pillar`/`wall`/`booth`). `lat/lng` luôn được tính lại từ `x, y` khi lưu.
+
+**Xác nhận / Đổi ô:** `POST /api/reservations/{id}/confirm-parked`, `POST /api/reservations/{id}/switch-slot` `{"new_slot_code","floor"}`
+(và `/api/parking/sessions/{id}/confirm-parked|switch-slot` cho xe vãng lai). Sự kiện WebSocket: `slot_confirmed`, `slot_switched`.
+
+**GPS:** `POST /api/telemetry/location` `{lat,lng,accuracy,speed,heading}` (khách đăng nhập), `GET /api/telemetry/locations` (Bảo vệ/Admin; `stale` khi mất tín hiệu > 10s).
+**Giám sát:** `GET /api/system/health-devices` (Neon DB, SePay, ESP32 offline > 15s, Webcam offline > 20s) · `GET /api/reports/export` (CSV UTF-8 BOM, Admin).
+**Demo (Admin):** `POST /api/admin/demo/alpr` `{"plate","gate":"IN|OUT"}`, `POST /api/admin/demo/sepay` (không tính doanh thu), `POST /api/admin/demo/reset` `{"confirm":"RESET"}`
+(trả ô về trống, đóng phiên đang mở — giữ lịch sử doanh thu).
+
+### ESP32 2 nhân (5 IR + Servo SG90 + LCD 16x2) — `POST /api/hardware/esp32/sync`
+Header `X-API-Key: <HARDWARE_API_KEY hoặc SEPAY_API_KEY>`, gửi mỗi 0,5–2 giây:
+```json
+{"device_id": "ESP32_MAIN", "sensors": {"IR_1": false, "IR_2": true, "IR_3": false, "IR_4": false, "IR_5": false}, "uptime_sec": 1234}
+```
+Trả về (lệnh cổng lấy xong là xóa khỏi hàng đợi):
+```json
+{"ok": true, "gate_action": "OPEN_IN", "open_duration_ms": 5000, "lcd_line1": "BIEN SO OK", "lcd_line2": "MOI VAO T1-A01", "available_slots": 27}
+```
+- `gate_action`: `OPEN_IN` / `OPEN_OUT` / `NONE` → quay Servo SG90 mở `open_duration_ms` rồi đóng.
+- `IR_x` được ánh xạ sang ô có `hardware_sensor_id` tương ứng (đổi trên web, không phải nạp lại firmware). IR báo có xe ở đúng ô được chỉ định → tự xác nhận đã đỗ;
+  ở ô trống khác trong 20 phút sau khi xe qua cổng → sự kiện `wrong_slot_alert` (`detected_slot_code`, `assigned_slot_code`).
+- LCD 16 ký tự, không dấu. Mặc định `SMART PARKING` / `CON TRONG: <n>`.
+
+### Webcam ALPR (script Python) — `POST /api/hardware/alpr/scan`, `POST /api/hardware/alpr/heartbeat`
+Header `X-API-Key` như trên.
+```json
+{"license_plate": "65A12345", "gate": "IN", "confidence": 0.93, "plate_image_base64": "<JPEG/PNG base64, ≤ 400KB>", "camera_id": "CAM_GATE"}
+```
+- `confidence` nhận 0–1 hoặc 0–100. Cùng biển + cùng cổng lặp lại trong 15 giây chỉ xử lý 1 lần (`"duplicate": true`).
+- Xử lý vào/ra cổng như ESP32, đẩy lệnh Servo/LCD, phát `alpr_event` (kèm ảnh, chỉ Bảo vệ/Admin nhận) và `gate_opened` (`slot_code`, `floor`) để trang khách tự mở Bản đồ chi tiết.
+- Heartbeat: `{"camera_id": "CAM_GATE", "fps": 15}` mỗi 5–10 giây.
+
+Ví dụ:
+```powershell
+curl -X POST https://<tên>.onrender.com/api/hardware/esp32/sync -H "X-API-Key: <key>" -H "Content-Type: application/json" -d '{"device_id":"ESP32_MAIN","sensors":{"IR_1":true},"uptime_sec":10}'
+```
+
+## 5. API cho ESP32 (bản cũ — không cần khóa, vẫn hoạt động)
 | Method | Endpoint | Body / Kết quả |
 |---|---|---|
 | POST | `/api/hardware/sensor` | `{"slot_code": "T1-A01", "occupied": true}` |
@@ -174,17 +233,22 @@ Nhớ mở cổng 8000 trong Windows Firewall nếu ESP32 không gọi được.
 ## 6. Cấu trúc
 ```
 backend/
-  main.py          FastAPI app, WebSocket /ws, task tự hủy đặt chỗ mỗi 10s
-  database.py      SQLite + seed 3 tầng
+  main.py          FastAPI app, WebSocket /ws (xác thực tùy chọn), scheduler 10s, /api/health kiểm tra CSDL
+  database.py      SQLite / PostgreSQL + seed 3 tầng
+  mapcfg.py        Bản đồ Kép: chiếu GPS <-> tọa độ nội bộ, kiểm tra & lưu sơ đồ, tìm đường từ cổng
+  devices.py       Heartbeat ESP32 / Webcam, hàng đợi lệnh Servo + LCD, ảnh ALPR gần nhất
   models.py        Pydantic schemas
   services.py      Nghiệp vụ: đặt chỗ, check-in/out, tính tiền, chuẩn hóa biển số
   realtime.py      WebSocket manager + trạng thái barrier
   auth.py          Mật khẩu PBKDF2, token HMAC, phân quyền, seed Admin mặc định
-  routers/         auth.py, parking.py, reservations.py, hardware.py, admin.py
+  routers/         auth.py, parking.py, reservations.py, hardware.py, admin.py, payment.py, v3.py
 frontend/src/
   App.jsx, api.js
   pages/           AuthScreen.jsx, CustomerView.jsx, AdminView.jsx
-  components/      ParkingMap (2D/3D), BookingModal, PaymentQRModal (VietQR), ReservationCard, TicketQR,
-                   CheckoutModal, SimulationPanel, SettingsPanel, AccountPanels, ui
+  gps.jsx, geo.js, voice.js, mapStore.js   GPS tự bật + chia sẻ, phép chiếu & tìm đường, giọng nói vi-VN, cấu hình bản đồ
+  components/      ParkingMap (2D/3D), DualMap (LeafletMap <-> FloorPlan), NavigationPanel (dẫn đường 2 chặng),
+                   AdminMapEditor, GuardPanels (ALPR feed, Sức khỏe thiết bị, GPS khách, Demo), SlotPicker,
+                   BookingModal, PaymentQRModal (VietQR), ReservationCard, TicketQR, CheckoutModal, SimulationPanel,
+                   SettingsPanel, AccountPanels, ui
 frontend/public/   manifest.json, sw.js, icons/ (PWA)
 ```

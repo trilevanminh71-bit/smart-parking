@@ -27,6 +27,12 @@ services:
       # API Key webhook SePay (trùng với key khai báo trong my.sepay.vn → Webhooks → Chứng thực API Key)
       - key: SEPAY_API_KEY
         sync: false
+      # (Tuỳ chọn) Khóa riêng cho ESP32 / Webcam ALPR (header X-API-Key). Bỏ trống -> dùng chung SEPAY_API_KEY
+      - key: HARDWARE_API_KEY
+        sync: false
+      # Mật khẩu tài khoản Bảo vệ mặc định guard@smartparking.vn cho lần khởi tạo đầu tiên (bỏ trống -> guard123, nên đổi ngay)
+      - key: GUARD_PASSWORD
+        sync: false
 
 databases:
   - name: smart-parking-db

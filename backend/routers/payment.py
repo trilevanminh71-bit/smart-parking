@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse, Response
 
 import auth
 import payments as pay
-from database import now
+from database import now, now_iso
+from devices import hub
 from models import ReceiptUpload, ResolveInput
 from realtime import barriers, manager
 
@@ -53,6 +54,7 @@ async def sepay_webhook(request: Request):
     if problem:
         fps = ", ".join("#" + pay.key_fingerprint(k) for k in pay.valid_api_keys()) or "không có"
         print(f"[SePay webhook] 401 — {problem} (khóa trên server: {fps})", flush=True)
+        hub.last_webhook = {"at": now_iso(), "status": "401"}
         return JSONResponse({"success": False, "message": problem}, status_code=401)
 
     body = _parse_body(raw, request.headers.get("content-type", ""))
@@ -62,8 +64,13 @@ async def sepay_webhook(request: Request):
     result = pay.process_webhook(body)
     for event, data in result.get("events", []):
         await manager.broadcast(event, data)
+    hub.last_webhook = {"at": now_iso(), "status": (result.get("log") or {}).get("status", "ok")}
     if result.get("open_exit"):
-        await barriers.open("exit", f"Xe {result['open_exit']} đã thanh toán (SePay)")
+        await barriers.open("exit", f"Xe {result['open_exit']} đã thanh toán (SePay)", lcd=("DA THANH TOAN", "TAM BIET"))
+        paid = next((d for e, d in result.get("events", []) if e == "payment"), {})
+        await manager.broadcast("gate_opened", {"gate": "exit", "action": "OPEN_OUT", "license_plate": result["open_exit"],
+                                                "slot_code": paid.get("slot_code"), "session_id": paid.get("id"),
+                                                "user_id": paid.get("user_id"), "via": "sepay"})
     if result.get("log") or result.get("open_exit"):
         await manager.broadcast("log")
     log = result.get("log")

@@ -14,7 +14,7 @@ export default function BookingModal({ slot, settings, user, onClose, onBooked, 
   const [form, setForm] = useState(blank)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const pendingMin = settings.pending_minutes || 5
+  const pendingMin = settings.pending_minutes || 10
   const isAdmin = user?.role === 'admin'
 
   useEffect(() => {

@@ -57,6 +57,8 @@ export default function OnboardingGuide({ open, onClose, onDone, settings }) {
   const hold = settings?.hold_minutes ?? 15
   const deposit = settings?.deposit_amount ?? 10000
   const rate = settings?.hourly_rate ?? 10000
+  const pending = settings?.pending_minutes ?? 10
+  const freeMin = settings?.free_minutes ?? 15
 
   return (
     <div className="fixed inset-0 z-[55] flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={onClose}>
@@ -85,7 +87,7 @@ export default function OnboardingGuide({ open, onClose, onDone, settings }) {
               <div className="flex items-start gap-1.5 text-xs text-slate-400">
                 <Timer className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
                 <span>
-                  Ghi đúng nội dung <b className="text-slate-200">COC &lt;mã vé&gt;</b>. Ô được giữ tạm <b className="text-slate-200">5 phút</b> chờ tiền về;
+                  Ghi đúng nội dung <b className="text-slate-200">COC &lt;mã vé&gt;</b>. Ô được giữ tạm <b className="text-slate-200">{pending} phút</b> chờ tiền về;
                   khi tiền vào, hệ thống <b className="text-slate-200">tự xác nhận</b> và giữ chỗ <b className="text-slate-200">{hold} phút</b>
                   (quá giờ chưa tới, chỗ tự hủy, không hoàn cọc).
                 </span>
@@ -101,7 +103,7 @@ export default function OnboardingGuide({ open, onClose, onDone, settings }) {
 
             <Step n={3} icon={Wallet} tone="violet" title="Thanh toán khi ra">
               <p>
-                Phí gửi xe tính theo giờ (<b>{vnd(rate)}/giờ</b>, tối thiểu 1 giờ), <b>tự động trừ tiền cọc</b> đã đóng.
+                Miễn phí <b>{freeMin} phút đầu</b>, sau đó tính theo giờ (<b>{vnd(rate)}/giờ</b>, làm tròn lên), <b>tự động trừ tiền cọc</b> đã đóng.
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Chip icon={QrCode}>Quét VietQR trên web</Chip>

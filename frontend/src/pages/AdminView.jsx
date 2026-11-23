@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Car, CalendarClock, ScrollText, BarChart3, Wallet, Banknote, QrCode, PiggyBank, Clock, LogOut,
   FastForward, XCircle, Activity, Settings, MonitorPlay, History, Layers, UserCog, Ticket, Loader2, LogIn, Map as MapIcon, BadgeCheck, Scale,
+  HeartPulse, PencilRuler, Clapperboard, CheckCircle2,
 } from 'lucide-react'
+import { AlprLiveFeed, DemoPanel, DeviceHealth, LiveLocations } from '../components/GuardPanels.jsx'
+import AdminMapEditor from '../components/AdminMapEditor.jsx'
+import NavigationPanel from '../components/NavigationPanel.jsx'
 import ReconcilePanel from '../components/ReconcilePanel.jsx'
 import SimulationPanel from '../components/SimulationPanel.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
@@ -14,8 +18,12 @@ import AdminActivityPanel from '../components/AdminActivityPanel.jsx'
 import { Empty, Stat, useToast } from '../components/ui.jsx'
 import { api, beep, fmtDuration, fmtTime, payMethod, useEvent, useNow, vnd } from '../api.js'
 
+// staff: Bảo vệ + Admin; còn lại chỉ Admin (Bảo vệ không sửa bản đồ GPS, không xóa dữ liệu)
 const TABS = [
-  { id: 'ops', label: 'Vận hành', icon: MonitorPlay },
+  { id: 'ops', label: 'Vận hành', icon: MonitorPlay, staff: true },
+  { id: 'devices', label: 'Giám sát', icon: HeartPulse, staff: true },
+  { id: 'map', label: 'Bản đồ', icon: PencilRuler },
+  { id: 'demo', label: 'Demo', icon: Clapperboard },
   { id: 'stats', label: 'Thống kê', icon: BarChart3 },
   { id: 'reconcile', label: 'Đối soát', icon: Scale },
   { id: 'settings', label: 'Cài đặt', icon: Settings },
@@ -69,12 +77,20 @@ const ALERTS = {
     : [`Auto-Gate cổng ${d.gate === 'entry' ? 'VÀO' : 'RA'}: ${d.plate} — ${d.message}`, 'error', 'warn'],
   gate_trigger: (d) => d.auto ? null : [`Có xe tới cổng ${d.gate === 'entry' ? 'VÀO' : 'RA'}${d.plate ? ` (${d.plate})` : ''} — Auto-Gate tắt, hãy xác nhận`, 'info', 'warn'],
   sensor: (d) => [`Cảm biến ESP32 ${d.slot_code}: ${d.status === 'occupied' ? 'CÓ XE' : 'trống'}`, 'info', 'info'],
+  wrong_slot_alert: (d) => [`⚠ Đỗ nhầm ô: xe ${d.license_plate} được chỉ định ${d.assigned_slot_code} nhưng vào ${d.detected_slot_code}`, 'error', 'warn'],
+  slot_switched: (d) => [`Xe ${d.license_plate} đổi ô ${d.old_slot_code} → ${d.new_slot_code}`, 'info', 'info'],
+  slot_confirmed: (d) => [`Xe ${d.license_plate} đã đỗ vào ô ${d.slot_code}${d.via === 'sensor' ? ' (cảm biến xác nhận)' : ''}`, 'success', 'info'],
+  map_updated: (d) => [`Sơ đồ bãi đã được cập nhật bởi ${d.updated_by} (${d.slots} ô)`, 'info', 'info'],
 }
 
 export default function AdminView({ state, tick, user, lastEvent, onToken }) {
   const toast = useToast()
   const [data, setData] = useState(null)
-  const [tab, setTab] = useState('ops')
+  const isAdmin = user?.role === 'admin'
+  const tabs = TABS.filter((t) => isAdmin || t.staff)
+  const [tab, setTabState] = useState(() => { try { const v = localStorage.getItem('sp_admin_tab'); return tabs.some((t) => t.id === v) ? v : 'ops' } catch { return 'ops' } })
+  const setTab = (t) => { setTabState(t); try { localStorage.setItem('sp_admin_tab', t) } catch { /* ignore */ } }
+  const [guide, setGuide] = useState(null)
   const [floor, setFloor] = useState(1)
   const [checkout, setCheckout] = useState(null)
   const [receivedAt, setReceivedAt] = useState(Date.now())
@@ -152,10 +168,10 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
           </div>
         </div>
       )}
-      <div className="grid grid-cols-6 gap-1 rounded-xl bg-slate-900/80 p-1">
-        {TABS.map((t) => (
+      <div className="-mx-1 flex gap-1 overflow-x-auto rounded-xl bg-slate-900/80 p-1 [scrollbar-width:none]">
+        {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[11px] font-medium transition sm:flex-row sm:gap-2 sm:text-sm ${tab === t.id ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-white'}`}>
+            className={`flex min-h-[44px] min-w-[68px] flex-1 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg px-2 text-[11px] font-medium transition sm:flex-row sm:gap-2 sm:text-sm ${tab === t.id ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-white'}`}>
             <t.icon className="h-4 w-4" /> {t.label}
           </button>
         ))}
@@ -163,6 +179,7 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
 
       {tab === 'ops' && (
         <>
+          <AlprLiveFeed barriers={data.barriers} toast={toast} />
           <TicketCheckin onResult={onGateResult} toast={toast} />
           <div className="grid gap-4 sm:gap-5 xl:grid-cols-[1.15fr_1fr]">
             <div className="card !p-3 sm:!p-4">
@@ -173,7 +190,7 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
               <div className="mb-3 flex items-center justify-between">
                 <div className="card-title !mb-0"><Layers className="h-4 w-4" /> Sơ đồ realtime</div>
                 <div className="flex rounded-lg bg-slate-950/70 p-0.5">
-                  {[1, 2, 3].map((f) => (
+                  {(state?.floors?.length ? state.floors : [1, 2, 3]).map((f) => (
                     <button key={f} onClick={() => setFloor(f)} className={`min-h-[36px] rounded-md px-3 text-xs ${floor === f ? 'bg-sky-500 text-white' : 'text-slate-400'}`}>T{f}</button>
                   ))}
                 </div>
@@ -197,6 +214,10 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
                           <div className="text-xs text-slate-400">
                             {s.slot_code} · {s.entry_type === 'reservation' ? <span className="text-amber-300">Đặt trước</span> : 'Vãng lai'} · vào {fmtTime(s.check_in_time)}
                           </div>
+                          {s.parked_confirmed_at
+                            ? <span className="badge mt-0.5 bg-emerald-500/15 text-emerald-300"><CheckCircle2 className="h-3 w-3" /> Đã đỗ đúng ô</span>
+                            : <button className="badge mt-0.5 bg-sky-500/15 text-sky-300 hover:bg-sky-500/25" onClick={() => act(`/api/parking/sessions/${s.id}/confirm-parked`, undefined, `Đã xác nhận xe ${s.license_plate} đỗ tại ô ${s.slot_code}`)}>
+                              Chưa xác nhận vào ô — bấm để xác nhận</button>}
                         </div>
                         <div className="text-right text-xs">
                           <div className="font-mono text-slate-300"><Clock className="mr-1 inline h-3 w-3" />{fmtDuration(secs)}</div>
@@ -219,15 +240,17 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
                               <Banknote className="h-3.5 w-3.5" /> Thu hộ
                             </button>
                           )}
-                          {s.payment_status === 'paid_ready' && (
+                          {isAdmin && s.payment_status === 'paid_ready' && (
                             <button className="btn-ghost btn-sm" title="Giả lập trôi 15 phút sau khi thanh toán trước"
                               onClick={() => act('/api/admin/simulate/exit-time', { session_id: s.id, minutes: 15 })}>
                               <FastForward className="h-3.5 w-3.5" /> -15p hạn ra
                             </button>
                           )}
-                          <button className="btn-ghost btn-sm" title="Giả lập trôi thêm 1 giờ" onClick={() => act('/api/admin/simulate/add-hours', { session_id: s.id, hours: 1 })}>
-                            <FastForward className="h-3.5 w-3.5" /> +1h
-                          </button>
+                          {isAdmin && (
+                            <button className="btn-ghost btn-sm" title="Giả lập trôi thêm 1 giờ" onClick={() => act('/api/admin/simulate/add-hours', { session_id: s.id, hours: 1 })}>
+                              <FastForward className="h-3.5 w-3.5" /> +1h
+                            </button>
+                          )}
                           <button className="btn-danger btn-sm" onClick={() => doCheckout(s)}><LogOut className="h-3.5 w-3.5" /> Check-out</button>
                         </div>
                       </div>
@@ -274,12 +297,14 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
                               <LogIn className="h-3.5 w-3.5" /> Xe vào
                             </button>
                           )}
-                          <button className="btn-ghost btn-sm" title="Tua nhanh 5 phút" onClick={() => act('/api/admin/simulate/reservation-time', { reservation_id: r.id, minutes: 5 })}>
-                            <FastForward className="h-3.5 w-3.5" /> -5p
-                          </button>
-                          <button className="btn-ghost btn-sm" title="Cho hết hạn ngay" onClick={() => act('/api/admin/simulate/reservation-time', { reservation_id: r.id, minutes: 9999 }, 'Đã cho đặt chỗ hết hạn')}>
-                            Hết hạn
-                          </button>
+                          {isAdmin && <>
+                            <button className="btn-ghost btn-sm" title="Tua nhanh 5 phút" onClick={() => act('/api/admin/simulate/reservation-time', { reservation_id: r.id, minutes: 5 })}>
+                              <FastForward className="h-3.5 w-3.5" /> -5p
+                            </button>
+                            <button className="btn-ghost btn-sm" title="Cho hết hạn ngay" onClick={() => act('/api/admin/simulate/reservation-time', { reservation_id: r.id, minutes: 9999 }, 'Đã cho đặt chỗ hết hạn')}>
+                              Hết hạn
+                            </button>
+                          </>}
                           <button className="btn-danger btn-sm" title="Hủy đặt chỗ" onClick={() => confirm('Hủy đặt chỗ này?') && act(`/api/admin/reservations/${r.id}/cancel`, undefined, 'Đã hủy đặt chỗ')}>
                             <XCircle className="h-3.5 w-3.5" />
                           </button>
@@ -373,12 +398,27 @@ export default function AdminView({ state, tick, user, lastEvent, onToken }) {
         </>
       )}
 
+      {tab === 'devices' && (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <DeviceHealth isAdmin={isAdmin} toast={toast} />
+          <LiveLocations />
+          <div className="xl:col-span-2"><AlprLiveFeed barriers={data.barriers} toast={toast} /></div>
+        </div>
+      )}
+      {tab === 'map' && isAdmin && <AdminMapEditor slots={slots} toast={toast} />}
+      {tab === 'demo' && isAdmin && (
+        <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+          <DemoPanel slots={slots} toast={toast} onPreview={setGuide} />
+          <DeviceHealth isAdmin toast={toast} />
+        </div>
+      )}
       {tab === 'reconcile' && <ReconcilePanel tick={tick} toast={toast} />}
       {tab === 'settings' && <SettingsPanel toast={toast} />}
       {tab === 'accounts' && <AdminAccountsPanel me={user} onToken={onToken} />}
       {tab === 'activity' && <AdminActivityPanel tick={tick} toast={toast} />}
 
       <CheckoutModal session={checkout} onClose={() => setCheckout(null)} toast={toast} />
+      {guide && <NavigationPanel nav={guide} slots={slots} toast={toast} onClose={() => setGuide(null)} onUpdate={(p) => setGuide((g) => (g ? { ...g, ...p } : g))} />}
     </div>
   )
 }

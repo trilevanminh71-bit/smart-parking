@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Layers, Search, Ticket, CreditCard, Loader2, MapPinned, History, Receipt, XCircle, Map as MapIcon, ImageUp, FileDown,
-  Megaphone, ChevronRight, Hand, LifeBuoy, CheckCircle2, AlertTriangle,
+  Megaphone, ChevronRight, Hand, LifeBuoy, CheckCircle2, AlertTriangle, Globe2, Navigation,
 } from 'lucide-react'
+import NavigationPanel from '../components/NavigationPanel.jsx'
+import DualMap from '../components/DualMap.jsx'
+import { useMapConfig } from '../mapStore.js'
+import { useGeo } from '../gps.jsx'
+import { vibrate } from '../voice.js'
 import ReceiptUploadModal from '../components/ReceiptUploadModal.jsx'
 import ProofModal from '../components/ProofModal.jsx'
 import { useBackHome } from '../nav.js'
@@ -54,7 +59,6 @@ function TabBar({ tab, onTab, badge, dot }) {
     </>
   )
 }
-import { NavMapModal } from '../components/NavMiniMap.jsx'
 import ContactCard from '../components/ContactCard.jsx'
 import ActivityList from '../components/ActivityList.jsx'
 import { api, beep, fmtDuration, fmtTime, payMethod, RES_STATUS, useEvent, useNow, vnd } from '../api.js'
@@ -68,7 +72,11 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
   const [ticket, setTicket] = useState(null)
   const [searching, setSearching] = useState(false)
   const [paySession, setPaySession] = useState(null)
-  const [nav, setNav] = useState(null) // { slotCode, plate, gateOpen, title }
+  // Dẫn đường 2 chặng: { slotCode, plate, reservationId, sessionId, gateOpened, passed, confirmed, wrongAlert, title }
+  const [guide, setGuide] = useState(null)
+  const openGuide = (g) => setGuide((cur) => ({ ...(cur && cur.slotCode === g.slotCode ? cur : {}), ...g }))
+  const mapCfg = useMapConfig()
+  const geo = useGeo()
   const [receiptRes, setReceiptRes] = useState(null)
   const [tab, setTab] = useState(readTab)
   const [unseen, setUnseen] = useState(false) // có cập nhật mới cho "Vé của tôi" khi đang ở tab khác
@@ -117,6 +125,9 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
     beep('success')
     reloadHistory()
     focusTickets(`[data-res-id="${r.id}"]`)
+    // Vừa được cấp ô đỗ -> tự mở Bản đồ chi tiết, dẫn đường chặng 1 (từ vị trí GPS tới cổng vào)
+    openGuide({ slotCode: r.slot_code, plate: r.license_plate, reservationId: r.id, sessionId: null, passed: false, gateOpened: false,
+      title: `Ô ${r.slot_code} đã được giữ cho bạn — dẫn đường tới bãi` })
   }
   // Đã thanh toán trước -> đóng QR, đếm ngược thời gian ra cổng
   const onPrepaidOk = (s) => {
@@ -146,12 +157,25 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
     if (ev.event === 'deposit_approved' && d.user_id === user?.id) onDepositOk(d)
     else if (ev.event === 'prepaid' && isMine(d)) onPrepaidOk(d)
     else if (ev.event === 'payment' && isMine(d)) onExitPaid(d)
-    else if (ev.event === 'check_in' && d.session && isMine(d.session)) {
-      // Xe của tôi vừa check-in (barrier cổng vào mở) -> phóng to bản đồ dẫn đường (popup)
-      const s = d.session
-      setNav({ slotCode: s.slot_code, plate: s.license_plate, gateOpen: true, title: `Barrier đã mở — mời xe ${s.license_plate} vào` })
+    else if (ev.event === 'gate_opened' && d.gate === 'entry' && isMine(d)) {
+      // Cổng mở cho xe của tôi -> tự mở & phóng to Bản đồ chi tiết, focus cổng + ô, vẽ đường, đọc chỉ đường
+      openGuide({ slotCode: d.slot_code, plate: d.license_plate, reservationId: d.reservation_id, sessionId: d.session_id,
+        gateOpened: true, passed: true, confirmed: false, wrongAlert: null, title: `Barrier đã mở — mời xe ${d.license_plate} vào ô ${d.slot_code}` })
       beep('success')
+      vibrate([120, 80, 120])
       focusTickets()
+    } else if (ev.event === 'wrong_slot_alert' && isMine(d)) {
+      vibrate([300, 150, 300])
+      beep('warn')
+      openGuide({ slotCode: d.assigned_slot_code, plate: d.license_plate, reservationId: d.reservation_id, sessionId: d.session_id,
+        passed: true, wrongAlert: d, title: `Cảnh báo đỗ nhầm ô — xe ${d.license_plate}` })
+    } else if (ev.event === 'slot_switched' && isMine(d)) {
+      reloadHistory()
+      setGuide((g) => (g && (g.sessionId === d.session_id || g.reservationId === d.reservation_id) ? { ...g, slotCode: d.new_slot_code, wrongAlert: null } : g))
+    } else if (ev.event === 'slot_confirmed' && isMine(d)) {
+      reloadHistory()
+      if (d.via === 'sensor') toast(`Cảm biến xác nhận xe ${d.license_plate} đã đỗ đúng ô ${d.slot_code}`, 'success')
+      setGuide((g) => (g && g.sessionId === d.session_id ? { ...g, confirmed: true } : g))
     } else if (ev.event === 'barrier' && d.entry?.state === 'OPEN') {
       // Barrier cổng vào mở -> cuộn tới bản đồ chỉ đường trên vé đang giữ và làm nổi bật
       setTimeout(() => {
@@ -181,7 +205,7 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
 
   const slots = state?.slots || []
   const summary = state?.summary || {}
-  const settings = state?.settings || { hold_minutes: 15, deposit_amount: 10000, hourly_rate: 10000, pending_minutes: 5 }
+  const settings = state?.settings || { hold_minutes: 15, deposit_amount: 10000, hourly_rate: 10000, pending_minutes: 10, free_minutes: 15 }
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const totalFree = Object.values(summary).reduce((a, s) => a + s.available, 0)
@@ -198,11 +222,11 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
         const before = prevStatus.current[r.id]
         if (before === 'active' && r.status === 'expired') toast(`Đặt chỗ ${r.slot_code} đã hết hạn giữ chỗ và bị hủy tự động`, 'error')
         if (before === 'pending_payment' && r.status === 'expired') {
-          toast(`Vé ${r.ticket_code}: quá ${settingsRef.current.pending_minutes || 5} phút chưa nhận được tiền cọc — ô ${r.slot_code} đã trả về trống. Nếu bạn đã chuyển tiền, hãy gửi ảnh biên lai trong tab Lịch sử & Hỗ trợ.`, 'error')
+          toast(`Vé ${r.ticket_code}: quá ${settingsRef.current.pending_minutes || 10} phút chưa nhận được tiền cọc — ô ${r.slot_code} đã trả về trống. Nếu bạn đã chuyển tiền, hãy gửi ảnh biên lai trong tab Lịch sử & Hỗ trợ.`, 'error')
         }
         // Vé của tôi đổi trạng thái khi đang ở tab khác -> chấm đỏ trên tab "Vé của tôi"
         if (before && before !== r.status && tabRef.current !== 'tickets') setUnseen(true)
-        if (before === 'active' && r.status === 'checked_in') toast(`Xe ${r.license_plate} đã vào bãi tại ô ${r.slot_code}`, 'success')
+        if (before === 'active' && r.status === 'checked_in') toast(`Xe ${r.license_plate} đã qua cổng — mời vào ô ${r.slot_code}`, 'success')
         if (before === 'pending_payment' && r.status === 'active') onDepositOk(r) // phòng khi lỡ sự kiện WebSocket
         prevStatus.current[r.id] = r.status
       })
@@ -280,6 +304,11 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
 
   const myCount = active.length + parkedMine.length
   const floorSlots = slots.filter((s) => s.floor === floor)
+  const floorList = state?.floors?.length ? state.floors : [1, 2, 3]
+  const pickOnMap = (s, st) => {
+    if (st !== 'available') return toast(`Ô ${s.slot_code} đang ${st === 'occupied' ? 'có xe' : 'được giữ chỗ'} — hãy chọn ô màu xanh`, 'info')
+    setBooking(slots.find((x) => x.code === s.slot_code))
+  }
 
   return (
     <div className="customer-ui space-y-5 sm:space-y-6">
@@ -299,7 +328,7 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
           <section className="space-y-1">
             <h2 className="text-xl font-bold sm:text-2xl">Chọn chỗ đỗ xe</h2>
             <p className="text-sm text-slate-300">
-              Còn <b className="text-emerald-300">{totalFree}/{slots.length}</b> chỗ trống · {vnd(settings.hourly_rate)}/giờ · đặt cọc {vnd(settings.deposit_amount)}
+              Còn <b className="text-emerald-300">{totalFree}/{slots.length}</b> chỗ trống · {settings.free_minutes ? `miễn phí ${settings.free_minutes} phút đầu · ` : ''}{vnd(settings.hourly_rate)}/giờ · đặt cọc {vnd(settings.deposit_amount)}
             </p>
           </section>
 
@@ -318,8 +347,8 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
           <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
             <div className="card !p-3 sm:!p-5">
               {/* Chọn tầng kèm số chỗ trống */}
-              <div className="mb-4 grid grid-cols-3 gap-2 sm:gap-3" role="tablist" aria-label="Chọn tầng">
-                {[1, 2, 3].map((f) => {
+              <div className={`mb-4 grid gap-2 sm:gap-3 ${floorList.length > 3 ? 'grid-cols-4' : 'grid-cols-3'}`} role="tablist" aria-label="Chọn tầng">
+                {floorList.map((f) => {
                   const free = summary[f]?.available ?? 0
                   const on = floor === f
                   return (
@@ -343,9 +372,17 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
 
             {/* Tổng quan 3D: chỉ hiện trên màn hình lớn để điện thoại ưu tiên lưới chọn ô */}
             <div className="card hidden lg:block">
-              <div className="card-title"><Layers className="h-4 w-4" /> Tổng quan 3 tầng</div>
+              <div className="card-title"><Layers className="h-4 w-4" /> Tổng quan {floorList.length} tầng</div>
               <ParkingMap3D summary={summary} floor={floor} onFloor={setFloor} />
             </div>
+          </div>
+
+          {/* Bản đồ Kép: GPS thực tế (Leaflet) <-> Sơ đồ 2D chi tiết — chạm ô xanh để đặt */}
+          <div className="card !p-3 sm:!p-5">
+            <div className="card-title"><Globe2 className="h-4 w-4" /> Bản đồ bãi xe · Tầng {floor}</div>
+            <DualMap cfg={mapCfg} slots={slots} floor={floor} onFloor={setFloor} floors={floorList} user={geo?.position}
+              highlightCode={highlight} onSlotClick={pickOnMap} height={340} />
+            <p className="mt-2 text-xs text-slate-400">Bản đồ GPS dùng tọa độ thật của bãi; Sơ đồ 2D hiển thị đúng vị trí, góc ô, cột và lối đi từng tầng.</p>
           </div>
         </>
       )}
@@ -375,7 +412,7 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
                 <ReservationCard key={r.id} res={r} holdMinutes={settings.hold_minutes} pendingMinutes={settings.pending_minutes} onCancel={() => cancel(r)}
                   onReceipt={() => setReceiptRes(r)} onProof={() => proof(r)}
                   slots={slots} gateOpen={state?.barriers?.entry?.state === 'OPEN'}
-                  onShowMap={() => setNav({ slotCode: r.slot_code, plate: r.license_plate, gateOpen: false })} />
+                  onShowMap={() => openGuide({ slotCode: r.slot_code, plate: r.license_plate, reservationId: r.id, sessionId: null, passed: false, gateOpened: false, title: null })} />
               ))}
             </div>
           )}
@@ -386,7 +423,8 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
               <div className="space-y-3">
                 {parkedMine.map((s) => (
                   <ParkedCard key={s.id} s={s} onPay={() => startPay(s)} grace={settings.exit_grace_minutes}
-                    onShowMap={() => setNav({ slotCode: s.slot_code, plate: s.license_plate, gateOpen: false })} />
+                    onShowMap={() => openGuide({ slotCode: s.slot_code, plate: s.license_plate, sessionId: s.id, reservationId: s.reservation_id,
+                      passed: true, gateOpened: false, confirmed: !!s.parked_confirmed_at, title: null })} />
                 ))}
               </div>
             </div>
@@ -408,11 +446,12 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
                 {ticket.reservation && (
                   <ReservationCard res={{ ...ticket.reservation, _receivedAt: ticket._receivedAt }} holdMinutes={settings.hold_minutes}
                     pendingMinutes={settings.pending_minutes} slots={slots}
-                    onShowMap={() => setNav({ slotCode: ticket.reservation.slot_code, plate: ticket.reservation.license_plate, gateOpen: false })} />
+                    onShowMap={() => openGuide({ slotCode: ticket.reservation.slot_code, plate: ticket.reservation.license_plate, reservationId: ticket.reservation.id, passed: false, title: null })} />
                 )}
                 {session && (
                   <ParkedCard s={{ ...session, _receivedAt: ticket._receivedAt }} onPay={() => startPay(session)} detailed grace={settings.exit_grace_minutes}
-                    onShowMap={() => setNav({ slotCode: session.slot_code, plate: session.license_plate, gateOpen: false })} />
+                    onShowMap={() => openGuide({ slotCode: session.slot_code, plate: session.license_plate, sessionId: session.id, reservationId: session.reservation_id,
+                      passed: true, confirmed: !!session.parked_confirmed_at, title: null })} />
                 )}
               </div>
             )}
@@ -454,7 +493,10 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
         }}
       />
 
-      <NavMapModal nav={nav} slots={slots} onClose={() => setNav(null)} />
+      {guide && (
+        <NavigationPanel nav={guide} slots={slots} toast={toast} onClose={() => setGuide(null)}
+          onUpdate={(patch) => { setGuide((g) => (g ? { ...g, ...patch } : g)); reloadHistory() }} />
+      )}
 
       {paySession && (
         <PaymentQRModal
@@ -464,7 +506,7 @@ export default function CustomerView({ state, tick, user, onProfileSaved, lastEv
           amount={paySession._amount}
           content={`PHI ${paySession.license_plate.replace(/[^A-Z0-9]/g, '')}`}
           lines={[
-            ['Số giờ', `${paySession.quote.hours_billed} giờ × ${vnd(settings.hourly_rate)}`],
+            ['Số giờ', paySession.quote.hours_billed ? `${paySession.quote.hours_billed} giờ × ${vnd(settings.hourly_rate)}` : `Trong ${settings.free_minutes ?? 15} phút miễn phí`],
             ['Đã trừ cọc', vnd(paySession.deposit_deducted)],
             ...(paySession.prepaid_amount ? [['Đã trả trước', vnd(paySession.prepaid_amount)]] : []),
           ]}
@@ -497,7 +539,18 @@ function ParkedCard({ s, onPay, onShowMap, detailed, grace }) {
       </div>
     )
   }
-  return <PayableCard s={s} q={q} onPay={onPay} onShowMap={onShowMap} detailed={detailed} grace={grace} />
+  return (
+    <div className="space-y-2">
+      {!s.parked_confirmed_at && onShowMap && (
+        <button onClick={onShowMap} className="flex w-full items-center gap-3 rounded-xl border border-sky-500/50 bg-sky-500/10 p-3 text-left hover:bg-sky-500/20">
+          <Navigation className="h-5 w-5 shrink-0 text-sky-300" />
+          <span className="min-w-0 flex-1 text-sm"><b>Xe đã qua cổng — tới ô {s.slot_code}</b><span className="block text-xs text-slate-300">Mở dẫn đường để Xác nhận đã vào ô hoặc Đổi sang ô trống khác</span></span>
+          <ChevronRight className="h-5 w-5 shrink-0 text-sky-300" />
+        </button>
+      )}
+      <PayableCard s={s} q={q} onPay={onPay} onShowMap={onShowMap} detailed={detailed} grace={grace} />
+    </div>
+  )
 }
 
 /** Thẻ xe đang đỗ có tính phí: chưa trả → "Thanh toán để chuẩn bị ra cổng"; đã trả → đếm ngược thời gian ra cổng. */

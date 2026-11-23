@@ -28,7 +28,7 @@ def ticket(body: PlateInput, user: dict = Depends(auth.current_user)):
     plate = svc.normalize_plate(body.plate)
     session = svc.find_parked_by_plate(plate)
     res = query_one(f"SELECT id, user_id FROM reservations WHERE license_plate = ? AND status IN {svc.HOLD_STATUSES}", (plate,))
-    own = res and (user["role"] == "admin" or res["user_id"] == user["id"])
+    own = res and (auth.is_staff(user) or res["user_id"] == user["id"])
     reservation = svc.get_reservation(res["id"]) if own else None
     if not session and not reservation:
         svc.fail(f"Không tìm thấy xe {plate} đang đỗ hoặc đặt chỗ của bạn", 404)

@@ -22,6 +22,8 @@ export default defineConfig(({ command }) => ({
           if (!id.includes('node_modules')) return
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react'
           if (id.includes('lucide-react')) return 'icons'
+          // Leaflet chỉ tải khi mở bản đồ GPS (React.lazy) -> chunk riêng, không làm nặng trang đầu
+          if (/[\\/]node_modules[\\/](leaflet|react-leaflet|@react-leaflet)[\\/]/.test(id)) return 'leaflet'
           return 'vendor'
         },
       },
