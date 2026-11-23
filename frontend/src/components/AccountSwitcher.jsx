@@ -26,7 +26,7 @@ export default function AccountSwitcher({ accounts, currentEmail, onPick, onAdd,
                   {a.role === 'admin' && <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-sky-400" />}
                 </span>
                 <span className="block truncate text-xs text-slate-400">{a.email}</span>
-                {needLogin && !current && <span className="flex items-center gap-1 text-[11px] text-amber-400"><KeyRound className="h-3 w-3" /> Phiên đã hết hạn — nhập lại mật khẩu</span>}
+                {needLogin && !current && <span className="flex items-center gap-1 text-[11px] text-amber-400"><KeyRound className="h-3 w-3" /> Đã đăng xuất — chạm để nhập lại mật khẩu</span>}
               </span>
               {current
                 ? <span className="flex shrink-0 items-center gap-1 text-xs text-sky-300"><CheckCircle2 className="h-4 w-4" /> Đang dùng</span>

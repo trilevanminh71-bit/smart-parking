@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ParkingSquare, Users, ShieldCheck, Wifi, WifiOff, Repeat, KeyRound, ChevronDown, HelpCircle, LocateFixed, LocateOff, Locate } from 'lucide-react'
+import { ParkingSquare, Users, ShieldCheck, Wifi, WifiOff, HelpCircle, LocateFixed, LocateOff, Locate } from 'lucide-react'
+import AccountMenu from './components/AccountMenu.jsx'
 import { GeoProvider, useGeo } from './gps.jsx'
 import OnboardingGuide, { guideSeen, markGuideSeen } from './components/OnboardingGuide.jsx'
 import CustomerView from './pages/CustomerView.jsx'
@@ -65,6 +66,22 @@ export default function App() {
   }, [])
   useEffect(() => { refreshUser() }, [auth?.token, refreshUser])
 
+  // Đăng xuất: bỏ token (tài khoản vẫn nằm trong danh sách chọn nhanh nhưng phải nhập lại mật khẩu), về màn hình đăng nhập
+  const logout = useCallback(() => {
+    const email = authRef.current?.user?.email
+    const token = authRef.current?.token
+    if (token) fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+    if (email) expireAccount(email)
+    saveAuth(null)
+    try { ['sp_mode', 'sp_admin_tab', 'sp_customer_tab'].forEach((k) => localStorage.removeItem(k)) } catch { /* ignore */ }
+    try { window.speechSynthesis?.cancel() } catch { /* ignore */ }
+    if (history.state?.spNav) history.replaceState(null, '', location.pathname)
+    setAccounts(loadAccounts())
+    setSwitching(false)
+    setAuth(null)
+    setNotice(email ? `Đã đăng xuất ${email}.` : 'Đã đăng xuất.')
+  }, [])
+
   const showAuth = !auth || switching
 
   return (
@@ -83,7 +100,7 @@ export default function App() {
       ) : (
         // key = tài khoản: đổi tài khoản -> kết nối realtime mới (xác thực lại WebSocket), GPS theo tài khoản mới
         <GeoProvider user={auth.user} key={auth.user.id}>
-          <Main auth={auth} onSwitch={() => setSwitching(true)} refreshUser={refreshUser}
+          <Main auth={auth} onSwitch={() => setSwitching(true)} onLogout={logout} refreshUser={refreshUser}
             onToken={(token) => login({ ...auth, token })} />
         </GeoProvider>
       )}
@@ -91,7 +108,6 @@ export default function App() {
   )
 }
 
-const ROLE_LABEL = { admin: 'Quản trị viên', guard: 'Bảo vệ trực cổng', customer: 'Khách hàng' }
 
 /** Nút trạng thái GPS trên thanh tiêu đề: bật/tắt chia sẻ vị trí thủ công. */
 function GpsChip() {
@@ -110,9 +126,8 @@ function GpsChip() {
   )
 }
 
-function Main({ auth, onSwitch, onToken, refreshUser }) {
+function Main({ auth, onSwitch, onLogout, onToken, refreshUser }) {
   const user = auth.user
-  const isAdmin = user.role === 'admin'
   const isStaff = user.role === 'admin' || user.role === 'guard'
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem(MODE_KEY) || (user.role === 'guard' ? 'admin' : 'customer') } catch { return 'customer' }
@@ -122,7 +137,6 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
   const [lastEvent, setLastEvent] = useState(null)
   const [error, setError] = useState('')
   const [account, setAccount] = useState(false)
-  const [menu, setMenu] = useState(false)
   const [guide, setGuide] = useState(false)
   const timer = useRef()
   const now = useNow(1000)
@@ -161,8 +175,6 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
   // Lần đầu vào Trang Khách hàng (chưa từng bấm "Đã hiểu") -> tự mở hướng dẫn
   useEffect(() => { if (view === 'customer' && !guideSeen()) setGuide(true) }, [view])
 
-  const initials = (user.full_name || user.email).trim().split(/\s+/).slice(-2).map((w) => w[0]).join('').toUpperCase()
-
   return (
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,rgba(14,165,233,0.12),transparent_60%)]">
       <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
@@ -177,9 +189,9 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
             </div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:gap-3">
             <span className="hidden font-mono text-sm text-slate-400 xl:inline">{new Date(now).toLocaleTimeString(lang === 'en' ? 'en-GB' : 'vi-VN')}</span>
-            <span className={`badge shrink-0 !p-1.5 sm:!px-2 sm:!py-0.5 ${connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`} title={connected ? 'Đang kết nối realtime' : 'Mất kết nối realtime'}>
+            <span className={`badge shrink-0 !p-1.5 max-[400px]:!hidden sm:!px-2 sm:!py-0.5 ${connected ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`} title={connected ? 'Đang kết nối realtime' : 'Mất kết nối realtime'}>
               {connected ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
               <span className="hidden lg:inline">{connected ? 'Realtime' : 'Mất kết nối'}</span>
             </span>
@@ -199,55 +211,12 @@ function Main({ auth, onSwitch, onToken, refreshUser }) {
             <PrefsControls />
 
             <button onClick={() => setGuide(true)} title="Hướng dẫn sử dụng" aria-label="Hướng dẫn sử dụng"
-              className="hidden min-h-[44px] min-w-[44px] shrink-0 sm:flex items-center justify-center gap-1 rounded-xl border border-slate-800 bg-slate-900 px-2 text-sm text-slate-200 hover:border-sky-500 hover:text-sky-300 sm:px-3">
-              <HelpCircle className="h-4 w-4" /> <span className="hidden sm:inline">Hướng dẫn</span>
+              className="hidden min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1 rounded-xl border border-slate-800 bg-slate-900 px-2 text-sm text-slate-200 hover:border-sky-500 hover:text-sky-300 md:flex xl:px-3">
+              <HelpCircle className="h-4 w-4" /> <span className="hidden xl:inline">Hướng dẫn</span>
             </button>
 
-            {/* Người dùng hiện tại: bấm để mở menu (Đổi tài khoản / Đổi mật khẩu) */}
-            <div className="relative min-w-0">
-              <button onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-haspopup="menu"
-                className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 py-1 pl-1 pr-2 hover:border-slate-600">
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isAdmin ? 'bg-sky-500 text-white' : isStaff ? 'bg-amber-500 text-slate-950' : 'bg-slate-700 text-slate-200'}`}>{initials}</span>
-                <span className="hidden min-w-0 text-left min-[480px]:block">
-                  <span className="block max-w-[96px] truncate text-xs font-semibold leading-tight sm:max-w-[160px] sm:text-sm">{user.full_name}</span>
-                  <span className="hidden max-w-[160px] truncate text-[11px] leading-tight text-slate-400 md:block">{user.email}</span>
-                </span>
-                <ChevronDown className={`hidden h-4 w-4 shrink-0 text-slate-500 transition min-[480px]:block ${menu ? 'rotate-180' : ''}`} />
-              </button>
-
-              {menu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setMenu(false)} />
-                  <div role="menu" className="absolute right-0 z-50 mt-2 w-[min(88vw,300px)] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-                    <div className="border-b border-slate-800 p-3">
-                      <div className="font-semibold">{user.full_name}</div>
-                      <div className="break-all text-xs text-slate-400">{user.email}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {ROLE_LABEL[user.role] || 'Khách hàng'}
-                        {user.phone ? ` · ${user.phone}` : ''}{user.default_plate ? ` · ${user.default_plate}` : ''}
-                      </div>
-                    </div>
-                    <button role="menuitem" onClick={() => { setMenu(false); onSwitch() }}
-                      className="flex min-h-[48px] w-full items-center gap-2 px-3 text-left text-sm hover:bg-slate-800">
-                      <Repeat className="h-4 w-4 text-sky-400" /> Đổi tài khoản
-                    </button>
-                    <button role="menuitem" onClick={() => { setMenu(false); setAccount(true) }}
-                      className="flex min-h-[48px] w-full items-center gap-2 px-3 text-left text-sm hover:bg-slate-800">
-                      <KeyRound className="h-4 w-4 text-slate-400" /> Đổi mật khẩu
-                    </button>
-                    <button role="menuitem" onClick={() => { setMenu(false); setGuide(true) }}
-                      className="flex min-h-[48px] w-full items-center gap-2 px-3 text-left text-sm hover:bg-slate-800">
-                      <HelpCircle className="h-4 w-4 text-slate-400" /> Hướng dẫn sử dụng
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <button onClick={onSwitch} title="Đổi tài khoản"
-              className="hidden min-h-[44px] shrink-0 items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 text-sm text-slate-200 hover:border-sky-500 hover:text-sky-300 md:flex">
-              <Repeat className="h-4 w-4" /> Đổi tài khoản
-            </button>
+            {/* Tài khoản hiện tại: 1 khối duy nhất, bấm mở menu Chuyển tài khoản / Đổi mật khẩu / Đăng xuất */}
+            <AccountMenu user={user} onSwitch={onSwitch} onPassword={() => setAccount(true)} onGuide={() => setGuide(true)} onLogout={onLogout} />
           </div>
         </div>
       </header>

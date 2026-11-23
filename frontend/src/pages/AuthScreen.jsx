@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ParkingSquare, LogIn, UserPlus, Loader2, Mail, Lock, User, Phone, Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import { ParkingSquare, LogIn, UserPlus, Loader2, Mail, Lock, User, Phone, Eye, EyeOff, ArrowLeft, UserCog, ShieldCheck, FlaskConical } from 'lucide-react'
 import AccountSwitcher, { SwitcherHeader } from '../components/AccountSwitcher.jsx'
 import { api } from '../api.js'
 import PrefsControls from '../components/PrefsControls.jsx'
@@ -9,6 +9,21 @@ import PrefsControls from '../components/PrefsControls.jsx'
  * Nếu trình duyệt đã lưu tài khoản -> hiện danh sách chọn nhanh trước.
  * Dùng lại cho "Đổi tài khoản": truyền `onCancel` để quay lại tài khoản đang dùng.
  */
+// Nút điền nhanh tài khoản mẫu: chỉ hiện khi chạy Local (localhost / IP LAN) hoặc mở link có ?demo=1.
+// Chỉ điền email — mật khẩu luôn do người dùng tự nhập (không đưa mật khẩu lên giao diện).
+const DEMO_MODE = (() => {
+  try {
+    const h = location.hostname
+    return import.meta.env.DEV || /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)
+      || new URLSearchParams(location.search).has('demo')
+  } catch { return false }
+})()
+const DEMO_ACCOUNTS = [
+  { id: 'admin', label: 'Admin', icon: UserCog, email: 'trilevanminh71@gmail.com' },
+  { id: 'guard', label: 'Bảo vệ', icon: ShieldCheck, email: 'guard@smartparking.vn' },
+  { id: 'customer', label: 'Khách hàng', icon: User },
+]
+
 export default function AuthScreen({ onAuth, accounts = [], currentEmail, onPick, onForget, initialEmail = '', onCancel, notice }) {
   const [view, setView] = useState(accounts.length && !initialEmail ? 'pick' : 'form')
   const [tab, setTab] = useState('login')
@@ -35,6 +50,19 @@ export default function AuthScreen({ onAuth, accounts = [], currentEmail, onPick
       setError(err.message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const quickFill = (a) => {
+    setError('')
+    if (a.email) {
+      setTab('login')
+      setForm((f) => ({ ...f, email: a.email, password: '' }))
+      setTimeout(() => document.querySelector('input[autocomplete="current-password"]')?.focus(), 50)
+    } else {
+      // Khách hàng mẫu: tạo nhanh tài khoản test mới (email ngẫu nhiên), chỉ cần đặt mật khẩu
+      setTab('register')
+      setForm((f) => ({ ...f, full_name: 'Khách Demo', phone: '0900000000', email: `khach.demo${Date.now().toString().slice(-6)}@test.local`, password: '', confirm: '' }))
     }
   }
 
@@ -92,6 +120,21 @@ export default function AuthScreen({ onAuth, accounts = [], currentEmail, onPick
               </button>
             ))}
           </div>
+
+          {DEMO_MODE && (
+            <div className="mb-4 rounded-xl border border-dashed border-sky-500/40 bg-sky-500/5 p-2.5">
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-sky-300"><FlaskConical className="h-3.5 w-3.5" /> Chế độ Demo/Test — điền nhanh tài khoản mẫu</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {DEMO_ACCOUNTS.map((a) => (
+                  <button key={a.id} type="button" onClick={() => quickFill(a)}
+                    className="flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg border border-slate-700 bg-slate-900 px-1 text-xs font-medium text-slate-200 hover:border-sky-500 hover:text-sky-300">
+                    <a.icon className="h-4 w-4" /> {a.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">Chỉ điền email — mật khẩu do bạn nhập. Khách hàng: tạo nhanh 1 tài khoản test mới.</p>
+            </div>
+          )}
 
           <form onSubmit={submit} className="space-y-3">
             {tab === 'register' && field('full_name', 'Họ và tên', User, { placeholder: 'Nguyễn Văn A', autoComplete: 'name' })}

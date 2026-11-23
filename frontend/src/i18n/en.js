@@ -163,6 +163,7 @@ export const DICT = {
   'Xóa khỏi thiết bị': 'Remove from device',
   'Chưa có tài khoản nào được lưu trên thiết bị này': 'No accounts saved on this device yet',
   'Phiên đã hết hạn — nhập lại mật khẩu': 'Session expired — enter your password again',
+  'Đã đăng xuất — chạm để nhập lại mật khẩu': 'Signed out — tap to enter your password again',
   'Đang dùng': 'In use',
   'Đăng nhập / Tạo tài khoản khác': 'Sign in / Create another account',
   'Chọn tài khoản để tiếp tục': 'Choose an account to continue',
@@ -1001,6 +1002,11 @@ export const DICT = {
   "giả lập SePay (Bảng Demo — không tính doanh thu)": "simulated SePay (Demo panel — not counted as revenue)",
   "Bãi xe 3 tầng (mặc định)": "3-floor parking lot (default)",
   "không gán": "none assigned",
+  "Chuyển tài khoản / Đăng nhập tài khoản khác": "Switch account / Sign in with another account",
+  "Đăng xuất": "Sign out",
+  "Chế độ Demo/Test — điền nhanh tài khoản mẫu": "Demo/Test mode — quick-fill sample accounts",
+  "Chỉ điền email — mật khẩu do bạn nhập. Khách hàng: tạo nhanh 1 tài khoản test mới.": "Fills the email only — you type the password. Customer: quickly creates a new test account.",
+  "Đã đăng xuất.": "Signed out.",
 }
 
 export const TEMPLATES = [
@@ -1286,4 +1292,6 @@ export const TEMPLATES = [
   ["{} cổng RA: {} ({}%) → {}", "{0} EXIT gate: {1} ({2}%) → {3}"],
   ["; cảm biến: {}", "; sensors: {0}"],
   ["Xe {} chưa thanh toán — cần trả {}", "Car {0} has not paid — {1} due"],
+  ["Đã đăng xuất {}.", "Signed out {0}."],
+  ["Tài khoản {}", "Account {0}"],
 ]

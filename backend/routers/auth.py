@@ -57,6 +57,14 @@ def login(body: LoginInput, request: Request):
     return {"token": auth.create_token(user), "user": auth.public_user(user)}
 
 
+@router.post("/logout")
+def logout(request: Request, user: dict = Depends(auth.current_user)):
+    """Ghi lịch sử đăng xuất (token không lưu phía server — trình duyệt tự xóa token)."""
+    with Tx() as db:
+        log_activity(db, user["id"], user["email"], "logout", f"Đăng xuất · {client_info(request)}")
+    return {"ok": True}
+
+
 @router.get("/me")
 def me(user: dict = Depends(auth.current_user)):
     return auth.public_user(user)
