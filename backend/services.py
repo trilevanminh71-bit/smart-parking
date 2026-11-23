@@ -1024,3 +1024,35 @@ def report_rows() -> list[list]:
                     {"parked": "Đang đỗ", "completed": "Đã ra"}.get(p["status"], p["status"]),
                     at_gate + prepaid_counted + deposit])
     return out
+
+
+# ---------------------------------------------------------------- Đối soát trạng thái ô lúc khởi động
+def reconcile_slots(sensor_occupied: set[str] | frozenset = frozenset()) -> list[dict]:
+    """Đồng bộ `slots.status` với dữ liệu thật (chạy khi server khởi động):
+    - Có lượt gửi xe đang đỗ (`parking_sessions.status = 'parked'`)  -> `occupied`
+    - Có đặt chỗ đang giữ (`pending_payment` / `active`)              -> `pending_payment` / `reserved`
+    - Cảm biến IR gắn với ô đang báo có xe (`sensor_occupied`)        -> giữ `occupied`
+    - Không có gì ở trên                                              -> trả về `available`
+    Trả về danh sách thay đổi [{code, old, new}]."""
+    changes = []
+    with Tx() as db:
+        slots = db.execute("SELECT id, code, status FROM slots WHERE active = 1").fetchall()
+        for s in slots:
+            parked = db.execute("SELECT 1 FROM parking_sessions WHERE slot_id = ? AND status = 'parked'", (s["id"],)).fetchone()
+            hold = db.execute(f"SELECT status FROM reservations WHERE slot_id = ? AND status IN {HOLD_STATUSES} ORDER BY id DESC LIMIT 1",
+                              (s["id"],)).fetchone()
+            if parked:
+                want = "occupied"
+            elif hold:
+                want = res_slot_status(hold)
+            elif s["code"] in sensor_occupied:
+                want = "occupied"
+            else:
+                want = "available"
+            if s["status"] != want:
+                db.execute("UPDATE slots SET status = ? WHERE id = ?", (want, s["id"]))
+                changes.append({"code": s["code"], "old": s["status"], "new": want})
+        if changes:
+            log(db, "system", "slot_reconcile", "Đối soát ô khi khởi động: "
+                + ", ".join(f"{c['code']} {c['old']}→{c['new']}" for c in changes))
+    return changes

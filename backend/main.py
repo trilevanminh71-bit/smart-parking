@@ -47,6 +47,13 @@ async def lifespan(app: FastAPI):
     freed = svc.cleanup_legacy_soft_holds()  # đã bỏ đặt chỗ không cọc: trả ô soft_reserved về trống
     if freed:
         log.info("Đã trả ô giữ tạm (không cọc) về trống: %s", freed)
+    # Ô "occupied"/"reserved" không còn lượt gửi / đặt chỗ hợp lệ -> trả về trống.
+    # Cảm biến IR: trạng thái lấy từ lần đồng bộ ESP32 gần nhất (lúc vừa khởi động thường chưa có; ESP32 gửi lại sau vài giây).
+    from devices import hub
+    ir_on = {code for sid, code in mapcfg.sensor_map().items() if hub.sensor_state.get(sid)}
+    fixed = svc.reconcile_slots(ir_on)
+    print("[Khởi động] Đối soát ô: " + (", ".join(f"{c['code']} {c['old']}→{c['new']}" for c in fixed) if fixed
+                                       else "mọi ô đã khớp dữ liệu, không cần sửa"), flush=True)
     import payments as pay
     keys = pay.valid_api_keys()
     print("[SePay] API Key: " + (", ".join(f"{len(k)} ký tự #{pay.key_fingerprint(k)}" for k in keys) if keys
